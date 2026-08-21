@@ -9,37 +9,16 @@ import { ChintanAITutorDrawer } from "./components/ChintanTutor/ChintanAITutorDr
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import { Loader2 } from "lucide-react";
 
-// Lazy-loaded major application modules to reduce initial bundle size and speed up page transitions
-const DashboardHome = React.lazy(() =>
-  import("./components/Dashboard/DashboardHome.js").then((m) => ({ default: m.DashboardHome }))
-);
-const CourseCatalog = React.lazy(() =>
-  import("./components/Courses/CourseCatalog.js").then((m) => ({ default: m.CourseCatalog }))
-);
-const CoursePlayer = React.lazy(() =>
-  import("./components/Courses/CoursePlayer.js").then((m) => ({ default: m.CoursePlayer }))
-);
-const ProblemList = React.lazy(() =>
-  import("./components/Coding/ProblemList.js").then((m) => ({ default: m.ProblemList }))
-);
-const CodeWorkspace = React.lazy(() =>
-  import("./components/Coding/CodeWorkspace.js").then((m) => ({ default: m.CodeWorkspace }))
-);
-const CompanyPrepHub = React.lazy(() =>
-  import("./components/CompanyPrep/CompanyPrepHub.js").then((m) => ({ default: m.CompanyPrepHub }))
-);
-const MockInterviewHub = React.lazy(() =>
-  import("./components/Interview/MockInterviewHub.js").then((m) => ({ default: m.MockInterviewHub }))
-);
-const AnalyticsView = React.lazy(() =>
-  import("./components/Analytics/AnalyticsView.js").then((m) => ({ default: m.AnalyticsView }))
-);
-const AdminPanel = React.lazy(() =>
-  import("./components/Admin/AdminPanel.js").then((m) => ({ default: m.AdminPanel }))
-);
-const PlaygroundPage = React.lazy(() =>
-  import("./components/Playground/PlaygroundPage.js").then((m) => ({ default: m.PlaygroundPage }))
-);
+import { DashboardHome } from "./components/Dashboard/DashboardHome.js";
+import { CourseCatalog } from "./components/Courses/CourseCatalog.js";
+import { CoursePlayer } from "./components/Courses/CoursePlayer.js";
+import { ProblemList } from "./components/Coding/ProblemList.js";
+import { CodeWorkspace } from "./components/Coding/CodeWorkspace.js";
+import { CompanyPrepHub } from "./components/CompanyPrep/CompanyPrepHub.js";
+import { MockInterviewHub } from "./components/Interview/MockInterviewHub.js";
+import { AnalyticsView } from "./components/Analytics/AnalyticsView.js";
+import { AdminPanel } from "./components/Admin/AdminPanel.js";
+import { PlaygroundPage } from "./components/Playground/PlaygroundPage.js";
 
 const ViewLoadingFallback: React.FC = () => (
   <div className="flex-1 flex flex-col items-center justify-center min-h-[60vh] text-zinc-400 font-mono space-y-3">

@@ -1,30 +1,91 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // Authentication Helper Functions
     function isAuthenticated() {
       return request.auth != null;
     }
+
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.role == 'admin' ||
+        request.auth.token.email == 'admin@chintangpt.com'
+      );
+    }
+
+    // 1. User Profiles Collection
     match /users/{userId} {
+      // Authenticated users can view peer/leaderboard profiles
       allow read: if isAuthenticated();
-      allow write: if isOwner(userId);
+
+      // Users can initialize their own profile; prevent unauthorized privilege escalation
+      allow create: if isOwner(userId) && (
+        !('role' in request.resource.data) ||
+        request.resource.data.role == 'student' ||
+        isAdmin()
+      );
+
+      // Users can update their own data, but cannot modify their role without admin privileges
+      allow update: if isOwner(userId) && (
+        !('role' in request.resource.data) ||
+        request.resource.data.role == resource.data.role ||
+        isAdmin()
+      );
+
+      // Only admins or the owner can delete the profile
+      allow delete: if isOwner(userId) || isAdmin();
+
+      // Subcollections owned by this user
+      match /{subcollection=**} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
     }
 
-    match /users/{userId}/{allSubcollections=**} {
-      allow read, write: if isOwner(userId);
+    // 2. AI Tutor & Interview Conversations
+    match /conversations/{userId} {
+      allow read, write: if isOwner(userId) || isAdmin();
+
+      match /sessions/{sessionId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+
+      match /{allSubcollections=**} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
     }
 
-    match /conversations/{userId}/sessions/{sessionId} {
-      allow read, write: if isOwner(userId);
-    }
-
+    // 3. Coding Problem Submissions
     match /problemSubmissions/{submissionId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow update, delete: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid ||
+        isAdmin()
+      );
+    }
+
+    // 4. Mock Interview Sessions
+    match /mockInterviews/{interviewId} {
+      allow read: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid ||
+        isAdmin()
+      );
+    }
+
+    // Default deny rule for all unspecified collections
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

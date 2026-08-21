@@ -1,5 +1,5 @@
 import { Course, PlaylistVideoItem, Lesson } from "../../src/types/index.js";
-import playlistDataRaw from "./playlistData.json" assert { type: "json" };
+import playlistDataRaw from "./playlistData.json";
 
 const playlistMap: Record<string, PlaylistVideoItem[]> = playlistDataRaw as any;
 

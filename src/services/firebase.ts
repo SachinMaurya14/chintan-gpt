@@ -58,7 +58,7 @@ export const firebaseConfig = {
     "G-HCPF59DZSL",
   firestoreDatabaseId:
     metaEnv?.VITE_FIREBASE_FIRESTORE_DATABASE_ID ||
-    localConfig?.firestoreDatabaseId ||
+    (localConfig as any)?.firestoreDatabaseId ||
     undefined
 };
 
