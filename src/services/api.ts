@@ -20,18 +20,19 @@ import {
 function getApiBaseUrl(): string {
   // Support custom backend URL from Vercel / production env
   const metaEnv = typeof import.meta !== "undefined" ? (import.meta as any).env : undefined;
-  const customUrl = (
+  const rawUrl = (
     metaEnv?.VITE_API_BASE_URL ||
     metaEnv?.VITE_APP_URL ||
     ""
   ).trim();
 
-  if (customUrl) {
-    const clean = customUrl.replace(/\/+$/, "");
+  // If a valid HTTP/HTTPS URL is provided (and not a placeholder like MY_APP_URL), use it
+  if (rawUrl && (rawUrl.startsWith("http://") || rawUrl.startsWith("https://"))) {
+    const clean = rawUrl.replace(/\/+$/, "");
     return clean.endsWith("/api") ? clean : `${clean}/api`;
   }
 
-  // Default to relative /api (works seamlessly with same-origin and Vercel serverless functions)
+  // Default to relative /api (works seamlessly on same-origin, dev proxy, and Vercel serverless functions)
   return "/api";
 }
 

@@ -21,10 +21,48 @@ import {
   onSnapshot,
   Firestore
 } from "firebase/firestore";
-import firebaseConfig from "../../firebase-applet-config.json";
+import localConfig from "../../firebase-applet-config.json";
 import { UserProfile } from "../types/index.js";
 
-// Initialize Firebase App safely
+// Read from runtime/build environment variables if present, otherwise fallback to local/user config
+const metaEnv = typeof import.meta !== "undefined" ? (import.meta as any).env : undefined;
+
+export const firebaseConfig = {
+  apiKey:
+    metaEnv?.VITE_FIREBASE_API_KEY ||
+    localConfig?.apiKey ||
+    "AIzaSyDygxBID0i02SMFVY5zg_AK6XRWi_S2GZc",
+  authDomain:
+    metaEnv?.VITE_FIREBASE_AUTH_DOMAIN ||
+    localConfig?.authDomain ||
+    "chintan-gpt-36e90.firebaseapp.com",
+  projectId:
+    metaEnv?.VITE_FIREBASE_PROJECT_ID ||
+    localConfig?.projectId ||
+    "chintan-gpt-36e90",
+  storageBucket:
+    metaEnv?.VITE_FIREBASE_STORAGE_BUCKET ||
+    localConfig?.storageBucket ||
+    "chintan-gpt-36e90.firebasestorage.app",
+  messagingSenderId:
+    metaEnv?.VITE_FIREBASE_MESSAGING_SENDER_ID ||
+    localConfig?.messagingSenderId ||
+    "691202754082",
+  appId:
+    metaEnv?.VITE_FIREBASE_APP_ID ||
+    localConfig?.appId ||
+    "1:691202754082:web:fc76b13207fbb931832c7b",
+  measurementId:
+    metaEnv?.VITE_FIREBASE_MEASUREMENT_ID ||
+    localConfig?.measurementId ||
+    "G-HCPF59DZSL",
+  firestoreDatabaseId:
+    metaEnv?.VITE_FIREBASE_FIRESTORE_DATABASE_ID ||
+    localConfig?.firestoreDatabaseId ||
+    undefined
+};
+
+// Initialize Firebase App safely without crashing
 let app: FirebaseApp | null = null;
 try {
   if (getApps().length === 0) {
@@ -42,7 +80,7 @@ try {
   googleProvider.setCustomParameters({ prompt: "select_account" });
 } catch {}
 
-// Initialize Firestore with specific database ID if configured
+// Initialize Firestore safely
 let firestoreInstance: Firestore;
 try {
   if (app) {
@@ -58,12 +96,11 @@ try {
 
 export const firestore: Firestore = firestoreInstance;
 
-
 /**
  * Sync user profile to Firestore
  */
 export async function syncUserProfileToFirestore(profile: UserProfile): Promise<void> {
-  if (!profile || !profile.id) return;
+  if (!profile || !profile.id || !firestore || typeof firestore.type !== "string") return;
   try {
     const userRef = doc(firestore, "users", profile.id);
     await setDoc(
@@ -83,7 +120,7 @@ export async function syncUserProfileToFirestore(profile: UserProfile): Promise<
  * Fetch user profile from Firestore
  */
 export async function getUserProfileFromFirestore(userId: string): Promise<UserProfile | null> {
-  if (!userId) return null;
+  if (!userId || !firestore || typeof firestore.type !== "string") return null;
   try {
     const userRef = doc(firestore, "users", userId);
     const snap = await getDoc(userRef);
@@ -103,7 +140,7 @@ export async function updateUserFirestoreData(
   userId: string,
   data: Partial<UserProfile>
 ): Promise<void> {
-  if (!userId) return;
+  if (!userId || !firestore || typeof firestore.type !== "string") return;
   try {
     const userRef = doc(firestore, "users", userId);
     await updateDoc(userRef, {
@@ -122,7 +159,10 @@ export {
   signOut,
   onAuthStateChanged,
   doc,
+  getDoc,
   setDoc,
-  getDoc
+  updateDoc,
+  collection,
+  onSnapshot
 };
 export type { FirebaseUser };
