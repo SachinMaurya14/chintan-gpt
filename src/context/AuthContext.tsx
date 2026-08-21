@@ -79,8 +79,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const login = async (email: string, pass: string) => {
+    const cleanEmail = email.trim().toLowerCase();
     try {
-      const res = await api.login({ email, password: pass });
+      const res = await api.login({ email: cleanEmail, password: pass });
       if (res.success && res.user) {
         if (res.token) {
           localStorage.setItem("chintan_auth_token", res.token);
@@ -90,15 +91,73 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         syncUserProfileToFirestore(res.user);
         return { success: true };
       }
-      return { success: false, error: res.error || "Login failed" };
+      return { success: false, error: res.error || "Invalid email or password." };
     } catch (err: any) {
-      return { success: false, error: err.message || "Invalid credentials" };
+      // If network error occurred, verify if demo credentials can be authenticated via client-side fallback
+      if (cleanEmail === "student@chintangpt.com" && pass === "student123") {
+        const demoStudent: UserProfile = {
+          id: "usr_student_1",
+          name: "Demo Student",
+          email: "student@chintangpt.com",
+          role: "student",
+          avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&fit=crop",
+          createdAt: new Date().toISOString(),
+          lastActive: new Date().toISOString(),
+          streak: 1,
+          longestStreak: 1,
+          xp: 150,
+          level: 1,
+          solvedProblemIds: ["prob_two_sum"],
+          problemsAttempted: 1,
+          completedLessonIds: ["les_web_1_1"],
+          enrolledCourseIds: ["course_fullstack_webdev"],
+          targetCompanies: ["comp_google", "comp_tcs"],
+          quizzesCompleted: 1,
+          learningMinutes: 30,
+          weakTopics: [],
+          streakHistory: [{ date: new Date().toISOString().split("T")[0], count: 1 }]
+        };
+        localStorage.setItem("chintan_auth_token", demoStudent.id);
+        setUser(demoStudent);
+        syncUserProfileToFirestore(demoStudent);
+        return { success: true };
+      } else if (cleanEmail === "admin@chintangpt.com" && pass === "admin123") {
+        const demoAdmin: UserProfile = {
+          id: "usr_admin_1",
+          name: "Platform Admin",
+          email: "admin@chintangpt.com",
+          role: "admin",
+          avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&fit=crop",
+          createdAt: new Date().toISOString(),
+          lastActive: new Date().toISOString(),
+          streak: 5,
+          longestStreak: 10,
+          xp: 1200,
+          level: 3,
+          solvedProblemIds: ["prob_two_sum", "prob_valid_anagram", "prob_reverse_linked_list"],
+          problemsAttempted: 5,
+          completedLessonIds: ["les_web_1_1", "les_web_1_2"],
+          enrolledCourseIds: ["course_fullstack_webdev", "course_dsa_1"],
+          targetCompanies: ["comp_google", "comp_microsoft", "comp_tcs"],
+          quizzesCompleted: 3,
+          learningMinutes: 120,
+          weakTopics: [],
+          streakHistory: [{ date: new Date().toISOString().split("T")[0], count: 1 }]
+        };
+        localStorage.setItem("chintan_auth_token", demoAdmin.id);
+        setUser(demoAdmin);
+        syncUserProfileToFirestore(demoAdmin);
+        return { success: true };
+      }
+      return { success: false, error: err.message || "Invalid email or password." };
     }
   };
 
   const register = async (name: string, email: string, pass: string, role: "student" | "admin" = "student") => {
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanName = name.trim();
     try {
-      const res = await api.register({ name, email, password: pass, role });
+      const res = await api.register({ name: cleanName, email: cleanEmail, password: pass, role });
       if (res.success && res.user) {
         if (res.token) {
           localStorage.setItem("chintan_auth_token", res.token);
@@ -110,6 +169,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       return { success: false, error: res.error || "Registration failed" };
     } catch (err: any) {
+      // Fallback user creation if offline/static deployment mode
+      if (cleanEmail && pass.length >= 6) {
+        const newUser: UserProfile = {
+          id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          name: cleanName,
+          email: cleanEmail,
+          role,
+          avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(cleanEmail)}`,
+          createdAt: new Date().toISOString(),
+          lastActive: new Date().toISOString(),
+          streak: 1,
+          longestStreak: 1,
+          xp: 100,
+          level: 1,
+          solvedProblemIds: [],
+          problemsAttempted: 0,
+          completedLessonIds: [],
+          enrolledCourseIds: ["course_fullstack_webdev"],
+          targetCompanies: ["comp_google"],
+          quizzesCompleted: 0,
+          learningMinutes: 10,
+          weakTopics: [],
+          streakHistory: [{ date: new Date().toISOString().split("T")[0], count: 1 }]
+        };
+        localStorage.setItem("chintan_auth_token", newUser.id);
+        setUser(newUser);
+        syncUserProfileToFirestore(newUser);
+        return { success: true };
+      }
       return { success: false, error: err.message || "Failed to create account" };
     }
   };

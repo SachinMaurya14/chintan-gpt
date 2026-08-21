@@ -17,7 +17,23 @@ import {
   SearchGroundingResponse
 } from "../types/index.js";
 
-const BASE_URL = "/api";
+function getApiBaseUrl(): string {
+  // Support custom backend URL from Vercel / production env
+  const metaEnv = typeof import.meta !== "undefined" ? (import.meta as any).env : undefined;
+  const customUrl = (
+    metaEnv?.VITE_API_BASE_URL ||
+    metaEnv?.VITE_APP_URL ||
+    ""
+  ).trim();
+
+  if (customUrl) {
+    const clean = customUrl.replace(/\/+$/, "");
+    return clean.endsWith("/api") ? clean : `${clean}/api`;
+  }
+
+  // Default to relative /api (works seamlessly with same-origin and Vercel serverless functions)
+  return "/api";
+}
 
 function getAuthToken(): string | null {
   try {
@@ -38,18 +54,38 @@ async function request<T>(endpoint: string, options?: RequestInit, retries: numb
     headers["Authorization"] = `Bearer ${token}`;
   }
 
+  const baseUrl = getApiBaseUrl();
+  const cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+  const fullUrl = `${baseUrl}${cleanEndpoint}`;
+
   try {
-    const res = await fetch(`${BASE_URL}${endpoint}`, {
+    const res = await fetch(fullUrl, {
       ...options,
       headers,
     });
 
+    const contentType = res.headers.get("content-type") || "";
+
     if (!res.ok) {
-      const errorData = await res.json().catch(() => ({ error: "Request failed" }));
-      throw new Error(errorData.error || `HTTP ${res.status}`);
+      let errorMessage = `HTTP ${res.status}: ${res.statusText || "Request failed"}`;
+      if (contentType.includes("application/json")) {
+        try {
+          const errorData = await res.json();
+          errorMessage = errorData.error || errorData.message || errorMessage;
+        } catch {}
+      } else {
+        const textBody = await res.text().catch(() => "");
+        if (textBody && textBody.length < 200 && !textBody.includes("<!doctype")) {
+          errorMessage = textBody;
+        }
+      }
+      throw new Error(errorMessage);
     }
 
-    return await res.json();
+    if (contentType.includes("application/json")) {
+      return await res.json();
+    }
+    return (await res.text()) as unknown as T;
   } catch (err: any) {
     // Retry GET or safe requests on network failure
     const isGet = !options?.method || options.method.toUpperCase() === "GET";
