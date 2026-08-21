@@ -93,7 +93,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       return { success: false, error: res.error || "Invalid email or password." };
     } catch (err: any) {
-      // If network error occurred, verify if demo credentials can be authenticated via client-side fallback
+      // 1. Check demo credentials fallback
       if (cleanEmail === "student@chintangpt.com" && pass === "student123") {
         const demoStudent: UserProfile = {
           id: "usr_student_1",
@@ -149,6 +149,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         syncUserProfileToFirestore(demoAdmin);
         return { success: true };
       }
+
+      // 2. Check if user profile is cached in Firestore
+      try {
+        const potentialId = `usr_${cleanEmail.replace(/[^a-zA-Z0-9]/g, "_")}`;
+        const firestoreProfile = await getUserProfileFromFirestore(potentialId);
+        if (firestoreProfile) {
+          localStorage.setItem("chintan_auth_token", firestoreProfile.id);
+          setUser(firestoreProfile);
+          return { success: true };
+        }
+      } catch {}
+
       return { success: false, error: err.message || "Invalid email or password." };
     }
   };

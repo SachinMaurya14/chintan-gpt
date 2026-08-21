@@ -24,22 +24,40 @@ import {
 import firebaseConfig from "../../firebase-applet-config.json";
 import { UserProfile } from "../types/index.js";
 
-// Initialize Firebase App
-let app: FirebaseApp;
-if (getApps().length === 0) {
-  app = initializeApp(firebaseConfig);
-} else {
-  app = getApps()[0];
+// Initialize Firebase App safely
+let app: FirebaseApp | null = null;
+try {
+  if (getApps().length === 0) {
+    app = initializeApp(firebaseConfig);
+  } else {
+    app = getApps()[0];
+  }
+} catch (err) {
+  console.warn("[Firebase] App initialization warning:", err);
 }
 
-export const auth: Auth = getAuth(app);
+export const auth: Auth = app ? getAuth(app) : ({} as Auth);
 export const googleProvider = new GoogleAuthProvider();
-googleProvider.setCustomParameters({ prompt: "select_account" });
+try {
+  googleProvider.setCustomParameters({ prompt: "select_account" });
+} catch {}
 
 // Initialize Firestore with specific database ID if configured
-export const firestore: Firestore = firebaseConfig.firestoreDatabaseId
-  ? initializeFirestore(app, {}, firebaseConfig.firestoreDatabaseId)
-  : getFirestore(app);
+let firestoreInstance: Firestore;
+try {
+  if (app) {
+    firestoreInstance = firebaseConfig.firestoreDatabaseId
+      ? initializeFirestore(app, {}, firebaseConfig.firestoreDatabaseId)
+      : getFirestore(app);
+  } else {
+    firestoreInstance = {} as Firestore;
+  }
+} catch {
+  firestoreInstance = app ? getFirestore(app) : ({} as Firestore);
+}
+
+export const firestore: Firestore = firestoreInstance;
+
 
 /**
  * Sync user profile to Firestore
