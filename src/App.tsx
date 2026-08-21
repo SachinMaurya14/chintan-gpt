@@ -1,0 +1,153 @@
+import React, { Suspense } from "react";
+import { AuthProvider, useAuth } from "./context/AuthContext.js";
+import { AppProvider, useApp } from "./context/AppContext.js";
+import { AuthPage } from "./components/Auth/AuthPage.js";
+import { Navbar } from "./components/Navbar.js";
+import { Sidebar } from "./components/Sidebar.js";
+import { SearchModal } from "./components/SearchModal.js";
+import { ChintanAITutorDrawer } from "./components/ChintanTutor/ChintanAITutorDrawer.js";
+import { ErrorBoundary } from "./components/ErrorBoundary.js";
+import { Loader2 } from "lucide-react";
+
+// Lazy-loaded major application modules to reduce initial bundle size and speed up page transitions
+const DashboardHome = React.lazy(() =>
+  import("./components/Dashboard/DashboardHome.js").then((m) => ({ default: m.DashboardHome }))
+);
+const CourseCatalog = React.lazy(() =>
+  import("./components/Courses/CourseCatalog.js").then((m) => ({ default: m.CourseCatalog }))
+);
+const CoursePlayer = React.lazy(() =>
+  import("./components/Courses/CoursePlayer.js").then((m) => ({ default: m.CoursePlayer }))
+);
+const ProblemList = React.lazy(() =>
+  import("./components/Coding/ProblemList.js").then((m) => ({ default: m.ProblemList }))
+);
+const CodeWorkspace = React.lazy(() =>
+  import("./components/Coding/CodeWorkspace.js").then((m) => ({ default: m.CodeWorkspace }))
+);
+const CompanyPrepHub = React.lazy(() =>
+  import("./components/CompanyPrep/CompanyPrepHub.js").then((m) => ({ default: m.CompanyPrepHub }))
+);
+const MockInterviewHub = React.lazy(() =>
+  import("./components/Interview/MockInterviewHub.js").then((m) => ({ default: m.MockInterviewHub }))
+);
+const AnalyticsView = React.lazy(() =>
+  import("./components/Analytics/AnalyticsView.js").then((m) => ({ default: m.AnalyticsView }))
+);
+const AdminPanel = React.lazy(() =>
+  import("./components/Admin/AdminPanel.js").then((m) => ({ default: m.AdminPanel }))
+);
+const PlaygroundPage = React.lazy(() =>
+  import("./components/Playground/PlaygroundPage.js").then((m) => ({ default: m.PlaygroundPage }))
+);
+
+const ViewLoadingFallback: React.FC = () => (
+  <div className="flex-1 flex flex-col items-center justify-center min-h-[60vh] text-zinc-400 font-mono space-y-3">
+    <Loader2 className="w-8 h-8 text-orange-500 animate-spin" />
+    <div className="text-xs uppercase tracking-widest">Loading view...</div>
+  </div>
+);
+
+const MainAppContent: React.FC = () => {
+  const { user, isAuthenticated, loading } = useAuth();
+  const {
+    currentTab,
+    setCurrentTab,
+    selectedCourseId,
+    selectedLessonId,
+    selectedProblemId,
+  } = useApp();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#09090b] flex flex-col items-center justify-center text-zinc-400 font-mono space-y-3">
+        <Loader2 className="w-8 h-8 text-orange-500 animate-spin" />
+        <div className="text-xs uppercase tracking-widest">Initializing Chintan GPT...</div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated || !user) {
+    return <AuthPage />;
+  }
+
+  const renderActiveView = () => {
+    // Restrict admin panel to real admins
+    if (currentTab === "admin" && user.role !== "admin") {
+      return <DashboardHome />;
+    }
+
+    // If in coding tab and a problem is selected -> open LeetCode workspace
+    if (currentTab === "coding" && selectedProblemId) {
+      return <CodeWorkspace problemId={selectedProblemId} />;
+    }
+
+    // If in courses tab and a course is selected -> open Course Player
+    if (currentTab === "courses" && selectedCourseId) {
+      return <CoursePlayer courseId={selectedCourseId} initialLessonId={selectedLessonId || undefined} />;
+    }
+
+    switch (currentTab) {
+      case "dashboard":
+        return <DashboardHome />;
+      case "playground":
+        return <PlaygroundPage />;
+      case "courses":
+        return <CourseCatalog />;
+      case "coding":
+        return <ProblemList />;
+      case "company-prep":
+        return <CompanyPrepHub />;
+      case "mock-interview":
+        return <MockInterviewHub />;
+      case "analytics":
+        return <AnalyticsView />;
+      case "admin":
+        return user.role === "admin" ? <AdminPanel /> : <DashboardHome />;
+      default:
+        return <DashboardHome />;
+    }
+  };
+
+  const isFullBleedView =
+    (currentTab === "coding" && !!selectedProblemId) ||
+    (currentTab === "courses" && !!selectedCourseId);
+
+  return (
+    <div className="min-h-screen flex flex-col bg-[#09090b] text-zinc-100 font-sans antialiased selection:bg-orange-500 selection:text-white transition-colors duration-200">
+      {/* Global Navbar */}
+      <Navbar />
+
+      {/* Body Area */}
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+        {/* Navigation Sidebar (hidden in full-bleed workspace on smaller screens or shown conditionally) */}
+        {!isFullBleedView && <Sidebar />}
+
+        {/* Dynamic Viewport */}
+        <main className="flex-1 overflow-y-auto min-h-[calc(100vh-4rem)]">
+          <ErrorBoundary>
+            <Suspense fallback={<ViewLoadingFallback />}>
+              {renderActiveView()}
+            </Suspense>
+          </ErrorBoundary>
+        </main>
+      </div>
+
+      {/* Chintan AI Global Mentor Drawer */}
+      <ChintanAITutorDrawer />
+
+      {/* Global Cmd+K Search Modal */}
+      <SearchModal />
+    </div>
+  );
+};
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppProvider>
+        <MainAppContent />
+      </AppProvider>
+    </AuthProvider>
+  );
+}

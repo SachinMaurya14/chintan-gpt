@@ -1,0 +1,7 @@
+{
+  "name": "Chintan GPT — AI Learning, Coding & Placement Platform",
+  "description": "Enterprise-grade EdTech platform featuring structured courses with YouTube integration, context-aware Chintan AI Tutor, native LeetCode-style coding sandbox, multi-language Cloud Playground IDE, 200-question Product Tech DSA roadmap, STEP 3 System Design (HLD/LLD/OOD), STEP 4 Core CS Fundamentals, company placement prep, and AI mock interviews.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
