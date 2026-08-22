@@ -10,14 +10,13 @@ import {
   Zap,
   Terminal,
   ArrowRight,
-  Bot,
-  LogOut
+  Bot
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext.js";
 import { useApp } from "../context/AppContext.js";
 
 export const Navbar: React.FC = () => {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const { theme, toggleTheme, setIsSearchOpen, isTutorOpen, setIsTutorOpen, setCurrentTab, currentTab } = useApp();
 
   const userRole = user?.role || "student";
@@ -165,7 +164,7 @@ export const Navbar: React.FC = () => {
             )}
           </div>
 
-          {/* User Profile & Logout */}
+          {/* User Profile */}
           {user && (
             <div className="flex items-center gap-2">
               <img
@@ -174,14 +173,6 @@ export const Navbar: React.FC = () => {
                 className="w-7 h-7 rounded-lg object-cover ring-1 ring-zinc-700 shadow-sm hidden sm:block"
                 title={user.name}
               />
-              <button
-                id="btn-logout"
-                onClick={logout}
-                className="p-1.5 rounded-lg border border-zinc-800 hover:border-rose-500/50 bg-[#121215] text-zinc-400 hover:text-rose-400 transition"
-                title="Log Out"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-              </button>
             </div>
           )}
         </div>

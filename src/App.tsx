@@ -1,7 +1,6 @@
 import React, { Suspense } from "react";
 import { AuthProvider, useAuth } from "./context/AuthContext.js";
 import { AppProvider, useApp } from "./context/AppContext.js";
-import { AuthPage } from "./components/Auth/AuthPage.js";
 import { Navbar } from "./components/Navbar.js";
 import { Sidebar } from "./components/Sidebar.js";
 import { SearchModal } from "./components/SearchModal.js";
@@ -28,7 +27,7 @@ const ViewLoadingFallback: React.FC = () => (
 );
 
 const MainAppContent: React.FC = () => {
-  const { user, isAuthenticated, loading } = useAuth();
+  const { user } = useAuth();
   const {
     currentTab,
     setCurrentTab,
@@ -37,25 +36,7 @@ const MainAppContent: React.FC = () => {
     selectedProblemId,
   } = useApp();
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-[#09090b] flex flex-col items-center justify-center text-zinc-400 font-mono space-y-3">
-        <Loader2 className="w-8 h-8 text-orange-500 animate-spin" />
-        <div className="text-xs uppercase tracking-widest">Initializing Chintan GPT...</div>
-      </div>
-    );
-  }
-
-  if (!isAuthenticated || !user) {
-    return <AuthPage />;
-  }
-
   const renderActiveView = () => {
-    // Restrict admin panel to real admins
-    if (currentTab === "admin" && user.role !== "admin") {
-      return <DashboardHome />;
-    }
-
     // If in coding tab and a problem is selected -> open LeetCode workspace
     if (currentTab === "coding" && selectedProblemId) {
       return <CodeWorkspace problemId={selectedProblemId} />;
@@ -82,7 +63,7 @@ const MainAppContent: React.FC = () => {
       case "analytics":
         return <AnalyticsView />;
       case "admin":
-        return user.role === "admin" ? <AdminPanel /> : <DashboardHome />;
+        return <AdminPanel />;
       default:
         return <DashboardHome />;
     }
