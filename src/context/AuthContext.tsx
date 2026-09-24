@@ -3,194 +3,161 @@ import { UserProfile, UserRole } from "../types/index.js";
 import { api } from "../services/api.js";
 
 interface AuthContextType {
-  user: UserProfile;
+  user: UserProfile | null;
   isAuthenticated: boolean;
   isAdmin: boolean;
   loading: boolean;
+  isAuthModalOpen: boolean;
+  setIsAuthModalOpen: (open: boolean) => void;
+  authModalMode: "login" | "register";
+  setAuthModalMode: (mode: "login" | "register") => void;
   login: (email: string, pass: string) => Promise<{ success: boolean; error?: string }>;
-  register: (name: string, email: string, pass: string, role?: "student" | "admin") => Promise<{ success: boolean; error?: string }>;
-  signInWithGoogle: () => Promise<{ success: boolean; error?: string }>;
+  register: (name: string, email: string, pass: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
-  switchRole: (newRole: UserRole) => Promise<void>;
   refreshProfile: () => Promise<void>;
   updateUser: (data: Partial<UserProfile>) => Promise<void>;
   setTargetCompanies: (companyIds: string[]) => Promise<void>;
   enrollCourse: (courseId: string) => Promise<void>;
 }
 
-const STORAGE_KEY = "chintan_user_profile_v2";
-
-const DEFAULT_PROFILE: UserProfile = {
-  id: "usr_student_main",
-  name: "Student Scholar",
-  email: "student@chintangpt.com",
-  role: "student",
-  avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=chintan_student_1",
-  createdAt: new Date().toISOString(),
-  lastActive: new Date().toISOString(),
-  streak: 3,
-  longestStreak: 5,
-  xp: 350,
-  level: 2,
-  solvedProblemIds: ["prob_two_sum", "prob_valid_anagram"],
-  problemsAttempted: 3,
-  completedLessonIds: ["les_web_1_1", "les_web_1_2"],
-  completedVideoIds: [],
-  enrolledCourseIds: ["course_fullstack_webdev", "course_dsa_1", "course_system_design_1"],
-  targetCompanies: ["comp_google", "comp_microsoft", "comp_tcs"],
-  quizzesCompleted: 2,
-  learningMinutes: 75,
-  weakTopics: [],
-  streakHistory: [
-    { date: new Date(Date.now() - 86400000 * 2).toISOString().split("T")[0], count: 1 },
-    { date: new Date(Date.now() - 86400000).toISOString().split("T")[0], count: 1 },
-    { date: new Date().toISOString().split("T")[0], count: 1 }
-  ],
-  lastWatchedVideos: {}
-};
-
-function getInitialProfile(): UserProfile {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (parsed && parsed.id) {
-        return {
-          ...DEFAULT_PROFILE,
-          ...parsed,
-          solvedProblemIds: Array.isArray(parsed.solvedProblemIds) ? parsed.solvedProblemIds : DEFAULT_PROFILE.solvedProblemIds,
-          completedLessonIds: Array.isArray(parsed.completedLessonIds) ? parsed.completedLessonIds : DEFAULT_PROFILE.completedLessonIds,
-          enrolledCourseIds: Array.isArray(parsed.enrolledCourseIds) ? parsed.enrolledCourseIds : DEFAULT_PROFILE.enrolledCourseIds,
-          targetCompanies: Array.isArray(parsed.targetCompanies) ? parsed.targetCompanies : DEFAULT_PROFILE.targetCompanies
-        };
-      }
-    }
-  } catch (err) {
-    console.warn("[AuthContext] Local profile parsing notice:", err);
-  }
-  return DEFAULT_PROFILE;
-}
-
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<UserProfile>(getInitialProfile);
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [authModalMode, setAuthModalMode] = useState<"login" | "register">("login");
 
-  // Sync profile state changes to localStorage
+  // On initial mount, verify existing session token with server
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(user));
-    } catch {}
-  }, [user]);
+    const initializeAuth = async () => {
+      const token = localStorage.getItem("chintan_auth_token");
+      if (!token) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const res = await api.getMe();
+        if (res && res.user) {
+          setUser(res.user);
+        } else {
+          localStorage.removeItem("chintan_auth_token");
+          setUser(null);
+        }
+      } catch (err) {
+        console.warn("[Auth] Existing session verification failed:", err);
+        localStorage.removeItem("chintan_auth_token");
+        setUser(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    initializeAuth();
+  }, []);
 
   const refreshProfile = async () => {
     try {
-      const serverProfile = await api.getProfile();
-      if (serverProfile) {
-        setUser((prev) => {
-          const merged: UserProfile = {
-            ...prev,
-            ...serverProfile,
-            solvedProblemIds: Array.from(new Set([...(prev.solvedProblemIds || []), ...(serverProfile.solvedProblemIds || [])])),
-            completedLessonIds: Array.from(new Set([...(prev.completedLessonIds || []), ...(serverProfile.completedLessonIds || [])])),
-            enrolledCourseIds: Array.from(new Set([...(prev.enrolledCourseIds || []), ...(serverProfile.enrolledCourseIds || [])])),
-            targetCompanies: Array.from(new Set([...(prev.targetCompanies || []), ...(serverProfile.targetCompanies || [])])),
-            streak: Math.max(prev.streak || 0, serverProfile.streak || 0),
-            longestStreak: Math.max(prev.longestStreak || 0, serverProfile.longestStreak || 0),
-            xp: Math.max(prev.xp || 0, serverProfile.xp || 0),
-          };
-          return merged;
-        });
+      const res = await api.getMe();
+      if (res && res.user) {
+        setUser(res.user);
       }
     } catch {
-      // Offline/client mode: keep local state
+      // Session expired or offline
     }
   };
 
-  const login = async (_email: string, _pass: string) => {
-    return { success: true };
+  const login = async (email: string, pass: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const res = await api.login({ email, password: pass });
+      if (res && res.success && res.user) {
+        setUser(res.user);
+        return { success: true };
+      }
+      return { success: false, error: res.error || "Invalid credentials." };
+    } catch (err: any) {
+      return { success: false, error: err?.message || "Login failed. Please try again." };
+    }
   };
 
-  const register = async (name: string, email: string, _pass: string, role: "student" | "admin" = "student") => {
-    const updated: UserProfile = {
-      ...user,
-      name: name || user.name,
-      email: email || user.email,
-      role
-    };
-    setUser(updated);
-    return { success: true };
-  };
-
-  const signInWithGoogle = async () => {
-    return { success: true };
+  const register = async (name: string, email: string, pass: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const res = await api.register({ name, email, password: pass });
+      if (res && res.success && res.user) {
+        setUser(res.user);
+        return { success: true };
+      }
+      return { success: false, error: res.error || "Registration failed." };
+    } catch (err: any) {
+      return { success: false, error: err?.message || "Registration failed. Please try again." };
+    }
   };
 
   const logout = async () => {
-    // Reset to default active student
-    setUser(DEFAULT_PROFILE);
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_PROFILE));
-    } catch {}
-  };
-
-  const switchRole = async (newRole: UserRole) => {
-    setUser((prev) => {
-      const updated: UserProfile = {
-        ...prev,
-        role: newRole,
-        name: newRole === "admin" ? "Platform Admin" : "Student Scholar",
-        email: newRole === "admin" ? "admin@chintangpt.com" : "student@chintangpt.com",
-        avatar: newRole === "admin"
-          ? "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&fit=crop"
-          : "https://api.dicebear.com/7.x/bottts/svg?seed=chintan_student_1"
-      };
-      return updated;
-    });
-    try {
-      await api.switchRole(newRole);
-    } catch {}
+      await api.logout();
+    } catch {
+      // Clear client session regardless
+    } finally {
+      localStorage.removeItem("chintan_auth_token");
+      setUser(null);
+    }
   };
 
   const updateUser = async (data: Partial<UserProfile>) => {
-    setUser((prev) => ({ ...prev, ...data }));
+    if (!user) return;
     try {
-      await api.updateProfile(data);
-    } catch {}
+      const res = await api.updateProfile(data);
+      if (res && res.user) {
+        setUser(res.user);
+      }
+    } catch (err) {
+      console.error("[Auth] Failed to update profile:", err);
+    }
   };
 
   const setTargetCompanies = async (companyIds: string[]) => {
-    setUser((prev) => ({ ...prev, targetCompanies: companyIds }));
+    if (!user) return;
     try {
-      await api.setTargetCompanies(companyIds);
-    } catch {}
+      const res = await api.setTargetCompanies(companyIds);
+      if (res && res.user) {
+        setUser(res.user);
+      }
+    } catch (err) {
+      console.error("[Auth] Failed to set target companies:", err);
+    }
   };
 
   const enrollCourse = async (courseId: string) => {
-    setUser((prev) => {
-      const current = prev.enrolledCourseIds || [];
-      if (!current.includes(courseId)) {
-        return { ...prev, enrolledCourseIds: [...current, courseId] };
-      }
-      return prev;
-    });
+    if (!user) return;
     try {
-      await api.enrollCourse(courseId);
-    } catch {}
+      const res = await api.enrollCourse(courseId);
+      if (res && res.user) {
+        setUser(res.user);
+      }
+    } catch (err) {
+      console.error("[Auth] Failed to enroll in course:", err);
+    }
   };
+
+  const isAuthenticated = !!user;
+  const isAdmin = user?.role === "admin";
 
   return (
     <AuthContext.Provider
       value={{
         user,
-        isAuthenticated: true,
-        isAdmin: user.role === "admin",
-        loading: false,
+        isAuthenticated,
+        isAdmin,
+        loading,
+        isAuthModalOpen,
+        setIsAuthModalOpen,
+        authModalMode,
+        setAuthModalMode,
         login,
         register,
-        signInWithGoogle,
         logout,
-        switchRole,
         refreshProfile,
         updateUser,
         setTargetCompanies,

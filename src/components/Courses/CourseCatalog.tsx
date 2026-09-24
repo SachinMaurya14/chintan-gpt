@@ -22,7 +22,7 @@ import { WebDevHub } from "./WebDevHub.js";
 
 export const CourseCatalog: React.FC = () => {
   const { user } = useAuth();
-  const { navigateToCourse, navigateToProblem } = useApp();
+  const { navigateToCourse, navigateToProblem, getCourseProgress, isCourseCompleted, getCourseProgressDetails } = useApp();
   const [courses, setCourses] = useState<Course[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
@@ -89,7 +89,7 @@ export const CourseCatalog: React.FC = () => {
           Courses & Learning Tracks
         </h1>
         <p className="text-sm text-zinc-400 max-w-2xl font-normal leading-relaxed">
-          Production-grade video curricula with integrated YouTube playback, real-time AI Tutor assistance, interactive quizzes, and placement-calibrated coding bridges.
+          Production-grade video curricula with integrated YouTube playback, interactive quizzes, and placement-calibrated coding bridges.
         </p>
       </div>
 
@@ -214,20 +214,10 @@ export const CourseCatalog: React.FC = () => {
       {/* Courses Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filtered.map((course) => {
-          let totalCourseLessons = 0;
-          let completedInCourse = 0;
-          const completedLessonIds = user?.completedLessonIds || [];
-          (course.modules || []).forEach((mod) => {
-            (mod.lessons || []).forEach((les) => {
-              totalCourseLessons++;
-              if (completedLessonIds.includes(les.id)) {
-                completedInCourse++;
-              }
-            });
-          });
-
-          const progressPercent = totalCourseLessons > 0 ? Math.round((completedInCourse / totalCourseLessons) * 100) : 0;
+          const progressPercent = getCourseProgress(course.id);
+          const isCompleted = isCourseCompleted(course.id);
           const isStarted = progressPercent > 0;
+          const details = getCourseProgressDetails(course.id);
 
           return (
             <div
@@ -245,6 +235,16 @@ export const CourseCatalog: React.FC = () => {
                   <div className="absolute top-3 left-3 px-2 py-0.5 rounded bg-black/80 backdrop-blur-md text-[10px] font-mono font-bold text-orange-400 uppercase tracking-wider border border-zinc-800">
                     {course.category}
                   </div>
+                  {isCompleted ? (
+                    <div className="absolute top-3 right-3 px-2.5 py-0.5 rounded-full bg-emerald-500/90 text-white text-[10px] font-mono font-black uppercase tracking-wider shadow flex items-center gap-1 backdrop-blur-sm">
+                      <CheckCircle2 className="w-3 h-3 text-white" />
+                      <span>Completed</span>
+                    </div>
+                  ) : isStarted ? (
+                    <div className="absolute top-3 right-3 px-2 py-0.5 rounded-full bg-orange-500/90 text-white text-[10px] font-mono font-bold uppercase tracking-wider shadow backdrop-blur-sm">
+                      {progressPercent}% Done
+                    </div>
+                  ) : null}
                   <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between text-[11px] font-mono text-zinc-300">
                     <span className="bg-black/70 px-2 py-0.5 rounded border border-zinc-800/80">{course.level}</span>
                     <span className="bg-black/70 px-2 py-0.5 rounded border border-zinc-800/80">{course.durationHours} Hours</span>
@@ -281,18 +281,36 @@ export const CourseCatalog: React.FC = () => {
 
               <div className="p-5 pt-0 space-y-3">
                 <div className="flex items-center justify-between text-xs font-mono">
-                  <span className="text-zinc-500">Progress</span>
-                  <span className="font-bold text-orange-400">{progressPercent}%</span>
+                  <span className="text-zinc-500">
+                    {details.completedCount > 0 ? `${details.completedCount}/${details.totalLessons} Lessons` : "Progress"}
+                  </span>
+                  <span className={`font-bold ${isCompleted ? "text-emerald-400" : "text-orange-400"}`}>
+                    {progressPercent}%
+                  </span>
                 </div>
                 <div className="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden">
                   <div
-                    className="bg-orange-500 h-1.5 rounded-full transition-all duration-500"
+                    className={`h-1.5 rounded-full transition-all duration-500 ${
+                      isCompleted ? "bg-emerald-500" : "bg-orange-500"
+                    }`}
                     style={{ width: `${progressPercent}%` }}
                   />
                 </div>
 
-                <button className="w-full py-2 rounded-lg bg-[#18181c] group-hover:bg-orange-500 text-zinc-300 group-hover:text-white font-mono font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition">
-                  <span>{isStarted ? "CONTINUE COURSE" : "START COURSE"}</span>
+                <button
+                  className={`w-full py-2 rounded-lg font-mono font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition ${
+                    isCompleted
+                      ? "bg-emerald-950/40 text-emerald-300 border border-emerald-500/30 group-hover:bg-emerald-600 group-hover:text-white"
+                      : "bg-[#18181c] group-hover:bg-orange-500 text-zinc-300 group-hover:text-white"
+                  }`}
+                >
+                  <span>
+                    {isCompleted
+                      ? "COMPLETED • REVIEW"
+                      : isStarted
+                      ? "CONTINUE COURSE"
+                      : "START COURSE"}
+                  </span>
                   <ChevronRight className="w-3.5 h-3.5" />
                 </button>
               </div>

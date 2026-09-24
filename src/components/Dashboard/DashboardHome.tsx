@@ -20,21 +20,29 @@ import {
   Activity,
   Layers,
   Check,
-  Compass
+  Compass,
+  MessageSquare
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext.js";
 import { useApp } from "../../context/AppContext.js";
 import { api } from "../../services/api.js";
-import { Course, CodingProblemSummary, CompanyPrep, ProblemSubmission } from "../../types/index.js";
+import {
+  Course,
+  CodingProblemSummary,
+  CompanyPrep,
+  ProblemSubmission,
+  MockInterviewSession
+} from "../../types/index.js";
 
 export const DashboardHome: React.FC = () => {
-  const { user } = useAuth();
+  const { user, setIsAuthModalOpen, setAuthModalMode } = useAuth();
   const { navigateToCourse, navigateToProblem, navigateToCompany, setCurrentTab } = useApp();
 
   const [courses, setCourses] = useState<Course[]>([]);
   const [problems, setProblems] = useState<CodingProblemSummary[]>([]);
   const [companies, setCompanies] = useState<CompanyPrep[]>([]);
   const [submissions, setSubmissions] = useState<ProblemSubmission[]>([]);
+  const [interviews, setInterviews] = useState<MockInterviewSession[]>([]);
   const [recommendations, setRecommendations] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -49,12 +57,14 @@ export const DashboardHome: React.FC = () => {
       api.getCompanies(),
       api.getSubmissions(),
       api.getRecommendations(),
+      api.getInterviews(),
     ])
-      .then(([cRes, pRes, compRes, subsRes, recsRes]) => {
+      .then(([cRes, pRes, compRes, subsRes, recsRes, intvRes]) => {
         if (cRes.status === "fulfilled" && cRes.value) setCourses(cRes.value);
         if (pRes.status === "fulfilled" && pRes.value) setProblems(pRes.value);
         if (compRes.status === "fulfilled" && compRes.value) setCompanies(compRes.value);
         if (subsRes.status === "fulfilled" && subsRes.value) setSubmissions(subsRes.value);
+        if (intvRes.status === "fulfilled" && intvRes.value) setInterviews(intvRes.value);
         if (recsRes.status === "fulfilled" && recsRes.value) {
           setRecommendations(recsRes.value);
         } else {
@@ -87,12 +97,32 @@ export const DashboardHome: React.FC = () => {
     fetchDashboardData();
   }, []);
 
+  // Authenticated User Isolation & Guest Support
+  const effectiveUser = useMemo(() => {
+    return (
+      user || {
+        id: "guest",
+        name: "Student",
+        email: "",
+        role: "student" as const,
+        streak: 0,
+        points: 0,
+        level: 1,
+        completedLessonIds: [],
+        solvedProblemIds: [],
+        enrolledCourseIds: [],
+        weakTopics: [],
+        targetCompanies: [],
+      }
+    );
+  }, [user]);
+
   // Real, authentic user statistics
-  const solvedProblemIds = user?.solvedProblemIds || [];
-  const completedLessonIds = user?.completedLessonIds || [];
-  const enrolledCourseIds = user?.enrolledCourseIds || [];
-  const weakTopics = user?.weakTopics || [];
-  const targetCompanies = user?.targetCompanies || [];
+  const solvedProblemIds = effectiveUser.solvedProblemIds || [];
+  const completedLessonIds = effectiveUser.completedLessonIds || [];
+  const enrolledCourseIds = effectiveUser.enrolledCourseIds || [];
+  const weakTopics = effectiveUser.weakTopics || [];
+  const targetCompanies = effectiveUser.targetCompanies || [];
 
   const {
     totalSolved,
@@ -130,6 +160,66 @@ export const DashboardHome: React.FC = () => {
       totalHard: tHard || 1
     };
   }, [problems, solvedProblemIds]);
+
+  // Catalog and user level statistics
+  const totalCatalogLessons = useMemo(() => {
+    return (courses || []).reduce((acc, c) => {
+      const lessons = c.modules?.reduce((mAcc, m) => mAcc + (m.lessons?.length || 0), 0) || c.totalLessons || 0;
+      return acc + lessons;
+    }, 0);
+  }, [courses]);
+
+  const overallCourseProgressPct = totalCatalogLessons > 0
+    ? Math.min(100, Math.round((completedLessonIds.length / totalCatalogLessons) * 100))
+    : 0;
+
+  const placementReadinessText = useMemo(() => {
+    if (totalSolved === 0 && interviews.length === 0 && completedLessonIds.length === 0) {
+      return "Not Evaluated";
+    }
+    const score = Math.min(100, Math.round(
+      Math.min(50, (totalSolved / 25) * 50) +
+      Math.min(25, (completedLessonIds.length / 15) * 25) +
+      Math.min(25, (interviews.length / 2) * 25)
+    ));
+    return `${score}% Readiness`;
+  }, [totalSolved, interviews.length, completedLessonIds.length]);
+
+  const userSubmissions = useMemo(() => {
+    return (submissions || []).filter(s => !s.userId || s.userId === effectiveUser.id);
+  }, [submissions, effectiveUser.id]);
+
+  const userInterviews = useMemo(() => {
+    return (interviews || []).filter(i => !i.userId || i.userId === effectiveUser.id);
+  }, [interviews, effectiveUser.id]);
+
+  const recentActivities = useMemo(() => {
+    const list: Array<{ id: string; type: "problem" | "lesson" | "interview"; title: string; subtitle: string; time: string; status?: string }> = [];
+
+    for (const sub of userSubmissions.slice(0, 5)) {
+      list.push({
+        id: sub.id,
+        type: "problem",
+        title: sub.problemTitle || "DSA Problem",
+        subtitle: `Language: ${sub.language} • Status: ${sub.status}`,
+        time: sub.submittedAt,
+        status: sub.status,
+      });
+    }
+
+    for (const intv of userInterviews.slice(0, 3)) {
+      list.push({
+        id: intv.id,
+        type: "interview",
+        title: `${intv.role || "Technical"} Mock Interview`,
+        subtitle: intv.company ? `Target: ${intv.company}` : "General Engineering",
+        time: intv.createdAt || new Date().toISOString(),
+        status: intv.status,
+      });
+    }
+
+    return list.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()).slice(0, 5);
+  }, [userSubmissions, userInterviews]);
 
   // Determine active course to resume (priority to last watched, then enrolled, then first available)
   const {
@@ -217,12 +307,33 @@ export const DashboardHome: React.FC = () => {
     );
   }
 
-  if (!user) return null;
-
   const isNewStudent = totalSolved === 0 && completedLessonIds.length === 0;
 
   return (
     <div id="student-dashboard-home" className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-10 animate-fadeIn text-zinc-100">
+      {/* Guest Mode Notice */}
+      {!user && (
+        <div className="p-4 rounded-2xl bg-[#121218] border border-orange-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
+            <span className="text-xs text-zinc-300 font-mono">
+              Exploring Chintan GPT in Guest Mode. All courses, DSA practice, and Chintan AI Tutor are active.
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setAuthModalMode("login");
+                setIsAuthModalOpen(true);
+              }}
+              className="px-3 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-xs font-mono font-bold uppercase transition"
+            >
+              Sign In / Register
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 1. PERSONALIZED STUDENT HERO SECTION */}
       <section className="relative rounded-3xl bg-gradient-to-b from-[#111118] to-[#0a0a0e] border border-zinc-800/90 p-8 sm:p-12 lg:p-14 overflow-hidden shadow-2xl">
         {/* Subtle geometric grid background */}
@@ -234,7 +345,7 @@ export const DashboardHome: React.FC = () => {
             {/* Top Micro-Tag */}
             <div className="flex items-center gap-2">
               <span className="text-[11px] font-mono font-bold tracking-widest text-amber-500 uppercase px-2.5 py-1 rounded-md bg-amber-500/10 border border-amber-500/20">
-                STUDENT DASHBOARD • LEVEL {user.level || 1}
+                STUDENT DASHBOARD • LEVEL {effectiveUser.level || 1}
               </span>
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             </div>
@@ -243,7 +354,7 @@ export const DashboardHome: React.FC = () => {
             <h1 className="text-3xl sm:text-5xl xl:text-6xl font-black tracking-tight text-white uppercase font-mono leading-[1.05] select-none">
               WELCOME BACK,<br />
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-400 via-amber-400 to-orange-500">
-                {user.name.toUpperCase()}
+                {effectiveUser.name.toUpperCase()}
               </span>
             </h1>
 
@@ -290,7 +401,7 @@ export const DashboardHome: React.FC = () => {
                 <span className="text-[11px] font-mono font-bold text-zinc-400 uppercase">Current Streak</span>
                 <span className="flex items-center gap-1.5 text-xs font-mono font-bold text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/20">
                   <Flame className="w-4 h-4 fill-amber-500 text-amber-500 animate-subtleFloat" />
-                  {user.streak || 0} DAYS
+                  {effectiveUser.streak || 0} DAYS
                 </span>
               </div>
 
@@ -300,20 +411,20 @@ export const DashboardHome: React.FC = () => {
                   <div className="text-[10px] font-mono uppercase text-zinc-400">Solved Probs</div>
                 </div>
                 <div className="p-3 rounded-xl bg-[#14141c] border border-zinc-800/90">
-                  <div className="text-2xl font-black font-mono text-amber-400">{user.xp || 0}</div>
+                  <div className="text-2xl font-black font-mono text-amber-400">{effectiveUser.xp || 0}</div>
                   <div className="text-[10px] font-mono uppercase text-zinc-400">Total XP</div>
                 </div>
               </div>
 
               <div className="pt-2 border-t border-zinc-800/80 space-y-1.5">
                 <div className="flex justify-between text-[11px] font-mono text-zinc-400">
-                  <span>Level {user.level || 1} Progress</span>
-                  <span className="text-zinc-300 font-semibold">{((user.xp || 0) % 500)} / 500 XP</span>
+                  <span>Level {effectiveUser.level || 1} Progress</span>
+                  <span className="text-zinc-300 font-semibold">{((effectiveUser.xp || 0) % 500)} / 500 XP</span>
                 </div>
                 <div className="w-full bg-zinc-800/80 rounded-full h-1.5 overflow-hidden">
                   <div
                     className="bg-gradient-to-r from-orange-500 to-amber-400 h-1.5 rounded-full transition-all duration-700 ease-out"
-                    style={{ width: `${Math.min(100, (((user.xp || 0) % 500) / 500) * 100)}%` }}
+                    style={{ width: `${Math.min(100, (((effectiveUser.xp || 0) % 500) / 500) * 100)}%` }}
                   />
                 </div>
               </div>
@@ -321,6 +432,151 @@ export const DashboardHome: React.FC = () => {
           </div>
         </div>
       </section>
+
+      {/* 2. CORE SYSTEM METRICS (Guarantees zero-state visibility with authentic data) */}
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Activity className="w-4 h-4 text-orange-400" />
+            <h2 className="text-xs font-mono font-bold uppercase tracking-wider text-zinc-300">
+              Preparation Progress Overview
+            </h2>
+          </div>
+          <span className="text-[11px] font-mono text-zinc-500">
+            Real-time verified candidate progress
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 font-mono">
+          {/* Progress: Problems Solved */}
+          <div className="p-4 rounded-2xl bg-[#0d0d12] border border-zinc-800/90 space-y-1.5 card-hover-fx">
+            <div className="flex items-center justify-between text-zinc-400 text-xs">
+              <span className="uppercase text-[10px] font-bold">Progress</span>
+              <Code2 className="w-3.5 h-3.5 text-cyan-400" />
+            </div>
+            <div className="text-lg sm:text-xl font-black text-white">
+              {totalSolved}
+            </div>
+            <div className="text-[10px] text-zinc-400 truncate">
+              {totalSolved === 1 ? "1 Problem Solved" : `${totalSolved} Problems Solved`}
+            </div>
+          </div>
+
+          {/* Learning: Topics Completed */}
+          <div className="p-4 rounded-2xl bg-[#0d0d12] border border-zinc-800/90 space-y-1.5 card-hover-fx">
+            <div className="flex items-center justify-between text-zinc-400 text-xs">
+              <span className="uppercase text-[10px] font-bold">Learning</span>
+              <BookOpen className="w-3.5 h-3.5 text-blue-400" />
+            </div>
+            <div className="text-lg sm:text-xl font-black text-white">
+              {completedLessonIds.length}
+            </div>
+            <div className="text-[10px] text-zinc-400 truncate">
+              {completedLessonIds.length === 1 ? "1 Topic Completed" : `${completedLessonIds.length} Topics Completed`}
+            </div>
+          </div>
+
+          {/* Interviews: Completed */}
+          <div className="p-4 rounded-2xl bg-[#0d0d12] border border-zinc-800/90 space-y-1.5 card-hover-fx">
+            <div className="flex items-center justify-between text-zinc-400 text-xs">
+              <span className="uppercase text-[10px] font-bold">Interviews</span>
+              <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+            </div>
+            <div className="text-lg sm:text-xl font-black text-white">
+              {interviews.length}
+            </div>
+            <div className="text-[10px] text-zinc-400 truncate">
+              {interviews.length === 1 ? "1 Completed" : `${interviews.length} Completed`}
+            </div>
+          </div>
+
+          {/* Courses: % Completed */}
+          <div className="p-4 rounded-2xl bg-[#0d0d12] border border-zinc-800/90 space-y-1.5 card-hover-fx">
+            <div className="flex items-center justify-between text-zinc-400 text-xs">
+              <span className="uppercase text-[10px] font-bold">Courses</span>
+              <Layers className="w-3.5 h-3.5 text-amber-400" />
+            </div>
+            <div className="text-lg sm:text-xl font-black text-white">
+              {overallCourseProgressPct}%
+            </div>
+            <div className="text-[10px] text-zinc-400 truncate">
+              {overallCourseProgressPct}% Completed
+            </div>
+          </div>
+
+          {/* Placement Readiness */}
+          <div className="p-4 rounded-2xl bg-[#0d0d12] border border-zinc-800/90 space-y-1.5 card-hover-fx">
+            <div className="flex items-center justify-between text-zinc-400 text-xs">
+              <span className="uppercase text-[10px] font-bold">Readiness</span>
+              <Target className="w-3.5 h-3.5 text-emerald-400" />
+            </div>
+            <div className="text-base sm:text-lg font-black text-white truncate">
+              {placementReadinessText}
+            </div>
+            <div className="text-[10px] text-zinc-400 truncate">
+              Placement Benchmark
+            </div>
+          </div>
+
+          {/* Target Goals */}
+          <div className="p-4 rounded-2xl bg-[#0d0d12] border border-zinc-800/90 space-y-1.5 card-hover-fx">
+            <div className="flex items-center justify-between text-zinc-400 text-xs">
+              <span className="uppercase text-[10px] font-bold">Target Tracks</span>
+              <Building2 className="w-3.5 h-3.5 text-orange-400" />
+            </div>
+            <div className="text-lg sm:text-xl font-black text-white">
+              {targetCompanies.length}
+            </div>
+            <div className="text-[10px] text-zinc-400 truncate">
+              {targetCompanies.length > 0 ? `${targetCompanies.length} Selected` : "Select Targets"}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Recommended Next Actions Row */}
+      <div className="p-4 sm:p-5 rounded-2xl bg-[#0e0e14] border border-zinc-800/90 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-orange-400 animate-pulse" />
+          <span className="text-xs font-mono font-bold text-zinc-300 uppercase">
+            Recommended Next Actions:
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            id="btn-quick-start-dsa"
+            onClick={() => setCurrentTab("coding")}
+            className="px-3.5 py-1.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-mono font-bold uppercase transition flex items-center gap-1.5 shadow-sm"
+          >
+            <Code2 className="w-3.5 h-3.5" />
+            <span>Start DSA</span>
+          </button>
+          <button
+            id="btn-quick-explore-courses"
+            onClick={() => setCurrentTab("courses")}
+            className="px-3.5 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-mono font-bold uppercase transition border border-zinc-700 flex items-center gap-1.5"
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+            <span>Explore Courses</span>
+          </button>
+          <button
+            id="btn-quick-mock-interview"
+            onClick={() => setCurrentTab("mock-interview")}
+            className="px-3.5 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-mono font-bold uppercase transition border border-zinc-700 flex items-center gap-1.5"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Practice Interview</span>
+          </button>
+          <button
+            id="btn-quick-tutor"
+            onClick={() => setCurrentTab("tutor")}
+            className="px-3.5 py-1.5 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 text-xs font-mono font-bold uppercase transition border border-purple-500/30 flex items-center gap-1.5"
+          >
+            <MessageSquare className="w-3.5 h-3.5 text-purple-400" />
+            <span>Ask Chintan AI Tutor</span>
+          </button>
+        </div>
+      </div>
 
       {/* 2. RESUME LEARNING OR GET STARTED */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

@@ -4,8 +4,7 @@ import {
   PlaygroundExecutionResponse,
   DiagnosticItem,
 } from "../types.js";
-import { PlaygroundSandbox } from "../sandbox.js";
-import { PLAYGROUND_CONFIG } from "../config.js";
+import { IsolatedExecutionClient } from "../sandbox.js";
 import path from "path";
 
 export class NodeAdapter extends BaseLanguageAdapter {
@@ -17,14 +16,11 @@ export class NodeAdapter extends BaseLanguageAdapter {
     version?: string;
     details?: string;
   }> {
-    const hasNode = await PlaygroundSandbox.isBinaryAvailable("node");
-    if (hasNode) {
-      const version = await PlaygroundSandbox.getBinaryVersion("node");
-      return { available: true, version, details: "Node.js LTS Environment" };
-    }
+    const health = await IsolatedExecutionClient.checkServiceHealth();
     return {
-      available: false,
-      details: "node was not found on system PATH.",
+      available: health.available,
+      version: health.version || "Node.js 22 LTS (Isolated Container)",
+      details: health.details,
     };
   }
 
@@ -32,87 +28,64 @@ export class NodeAdapter extends BaseLanguageAdapter {
     request: PlaygroundExecutionRequest,
     options: { timeoutMs: number; maxOutputBytes: number }
   ): Promise<PlaygroundExecutionResponse> {
-    const runtimeCheck = await this.isRuntimeAvailable();
-    if (!runtimeCheck.available) {
-      return this.createUnavailableResponse(
-        "Node.js",
-        "System requires Node.js runtime installed on the container host."
-      );
+    const validation = IsolatedExecutionClient.validatePayload(request.files, request.stdin);
+    if (!validation.valid) {
+      return this.createResponse("error", "", validation.error || "Invalid payload.", -1, 0);
     }
 
-    const { dir } = await PlaygroundSandbox.createTempWorkspace("node");
-
-    try {
-      const written = await PlaygroundSandbox.writeProjectFiles(dir, request.files);
-      const jsFiles = written.filter((f) => f.endsWith(".js") || f.endsWith(".mjs") || f.endsWith(".cjs") || f.endsWith(".json"));
-
-      if (jsFiles.length === 0) {
-        return this.createResponse(
-          "error",
-          "",
-          "No Node.js source files (.js, .json) found in project workspace.",
-          -1,
-          0
-        );
-      }
-
-      // Determine entrypoint: activeFileName > server.js > index.js > main.js > first js
-      const entryFile =
-        (request.activeFileName && jsFiles.includes(request.activeFileName))
-          ? request.activeFileName
-          : jsFiles.includes("server.js")
-          ? "server.js"
-          : jsFiles.includes("index.js")
-          ? "index.js"
-          : jsFiles.includes("main.js")
-          ? "main.js"
-          : jsFiles.find((f) => f.endsWith(".js")) || jsFiles[0];
-
-      // Execute in isolated sandbox
-      const runResult = await PlaygroundSandbox.executeCommand(
-        "node",
-        [`--max-old-space-size=${PLAYGROUND_CONFIG.NODE_MAX_OLD_SPACE_MB}`, entryFile],
-        {
-          cwd: dir,
-          stdin: request.stdin,
-          timeoutMs: options.timeoutMs,
-          maxOutputBytes: options.maxOutputBytes,
-        }
-      );
-
-      const sanitizedStdout = PlaygroundSandbox.sanitizeOutput(runResult.stdout, dir);
-      const sanitizedStderr = PlaygroundSandbox.sanitizeOutput(runResult.stderr, dir);
-      const diagnostics = this.parseNodeDiagnostics(sanitizedStderr);
-
-      let status: PlaygroundExecutionResponse["status"] = "success";
-      let systemMessage: string | undefined;
-
-      if (runResult.timedOut) {
-        status = "timeout";
-        systemMessage = `Node.js execution timed out after ${options.timeoutMs}ms (active server listener or infinite loop).`;
-      } else if (runResult.exitCode !== 0) {
-        status = sanitizedStderr.includes("SyntaxError:") ? "compile_error" : "runtime_error";
-      }
-
+    const jsFiles = request.files.filter((f) => f.name.endsWith(".js") || f.name.endsWith(".mjs") || f.name.endsWith(".cjs") || f.name.endsWith(".json"));
+    if (jsFiles.length === 0) {
       return this.createResponse(
-        status,
-        sanitizedStdout,
-        sanitizedStderr,
-        runResult.exitCode,
-        runResult.durationMs,
-        diagnostics,
-        systemMessage,
-        {
-          metadata: {
-            language: "Node.js",
-            version: runtimeCheck.version,
-            timestamp: new Date().toISOString(),
-          },
-        }
+        "error",
+        "",
+        "No Node.js source files (.js, .json) found in project workspace.",
+        -1,
+        0
       );
-    } finally {
-      await PlaygroundSandbox.cleanup(dir);
     }
+
+    const sourceCode = IsolatedExecutionClient.bundleFiles("node", request.files, request.activeFileName);
+
+    const runResult = await IsolatedExecutionClient.execute({
+      language: "node",
+      sourceCode,
+      stdin: request.stdin,
+      timeoutMs: options.timeoutMs,
+    });
+
+    const sanitizedStdout = IsolatedExecutionClient.sanitizeOutput(runResult.stdout, options.maxOutputBytes);
+    const sanitizedStderr = IsolatedExecutionClient.sanitizeOutput(runResult.stderr, options.maxOutputBytes);
+    const diagnostics = this.parseNodeDiagnostics(sanitizedStderr);
+
+    let status: PlaygroundExecutionResponse["status"] = "success";
+    let systemMessage: string | undefined;
+
+    if (runResult.timedOut) {
+      status = "timeout";
+      systemMessage = `Execution timed out after ${options.timeoutMs}ms (infinite loop or unhandled async operation).`;
+    } else if (runResult.statusDescription === "Service Unavailable" || runResult.error) {
+      status = "runtime_unavailable";
+      systemMessage = "Secure execution service is currently unavailable. Untrusted host execution is disabled for security.";
+    } else if (runResult.exitCode !== 0) {
+      status = sanitizedStderr.includes("SyntaxError:") ? "compile_error" : "runtime_error";
+    }
+
+    return this.createResponse(
+      status,
+      sanitizedStdout,
+      sanitizedStderr,
+      runResult.exitCode,
+      runResult.durationMs,
+      diagnostics,
+      systemMessage,
+      {
+        metadata: {
+          language: "Node.js",
+          version: "Node.js 22 LTS (Isolated Container)",
+          timestamp: new Date().toISOString(),
+        },
+      }
+    );
   }
 
   private parseNodeDiagnostics(errorText: string): DiagnosticItem[] {
@@ -121,6 +94,7 @@ export class NodeAdapter extends BaseLanguageAdapter {
 
     const regex = /([a-zA-Z0-9_\-./\\]+\.js):(\d+)(?::(\d+))?/gim;
     let match;
+
     const lines = errorText.trim().split("\n");
     const headerError = lines[0] || "Node.js Error";
 

@@ -9,7 +9,8 @@ import {
   ShieldCheck,
   Zap,
   Target,
-  Terminal
+  Terminal,
+  Sparkles
 } from "lucide-react";
 import { useApp, NavTab } from "../context/AppContext.js";
 import { useAuth } from "../context/AuthContext.js";
@@ -26,6 +27,14 @@ export const Sidebar: React.FC = () => {
       accentColor: "text-amber-500",
       activeBg: "bg-amber-500/10 border-amber-500/30 text-white",
       badge: null,
+    },
+    {
+      id: "tutor" as NavTab,
+      label: "Chintan AI Tutor",
+      icon: Sparkles,
+      accentColor: "text-orange-400",
+      activeBg: "bg-gradient-to-r from-orange-500/15 to-amber-500/15 border-orange-500/40 text-white font-bold",
+      badge: "Gemini",
     },
     {
       id: "playground" as NavTab,

@@ -4,7 +4,6 @@ import {
   CheckCircle2,
   Play,
   FileText,
-  Sparkles,
   HelpCircle,
   Code2,
   Clock,
@@ -12,7 +11,6 @@ import {
   Loader2,
   ChevronRight,
   ChevronLeft,
-  Bot,
   ExternalLink,
   Video,
   ListVideo,
@@ -20,7 +18,8 @@ import {
   RotateCcw,
   Check,
   Bookmark,
-  Share2
+  Share2,
+  Sparkles
 } from "lucide-react";
 import { Course, Lesson, QuizQuestion, CourseResource, PlaylistVideoItem } from "../../types/index.js";
 import { useAuth } from "../../context/AuthContext.js";
@@ -34,7 +33,7 @@ export const CoursePlayer: React.FC<{ courseId: string; initialLessonId?: string
   initialVideoId,
 }) => {
   const { user, refreshProfile } = useAuth();
-  const { setSelectedCourseId, navigateToProblem, setIsTutorOpen, setTutorContext } = useApp();
+  const { setSelectedCourseId, navigateToProblem, markVideoComplete, isLessonCompleted } = useApp();
 
   const [course, setCourse] = useState<Course | null>(null);
   const [activeResource, setActiveResource] = useState<CourseResource | null>(null);
@@ -47,10 +46,7 @@ export const CoursePlayer: React.FC<{ courseId: string; initialLessonId?: string
   const [searchQuery, setSearchQuery] = useState("");
 
   // Tabs
-  const [activeTab, setActiveTab] = useState<"notes" | "ai-doubt" | "quiz" | "practice">("notes");
-  const [doubtInput, setDoubtInput] = useState("");
-  const [doubtResponse, setDoubtResponse] = useState<string | null>(null);
-  const [doubtLoading, setDoubtLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<"notes" | "quiz" | "practice">("notes");
 
   // Dynamic Quiz State
   const [quizQuestions, setQuizQuestions] = useState<QuizQuestion[]>([]);
@@ -130,21 +126,13 @@ export const CoursePlayer: React.FC<{ courseId: string; initialLessonId?: string
         topic: c.category,
         difficulty: (activeItem?.position || 1) < 3 ? "Beginner" : (activeItem?.position || 1) < 10 ? "Intermediate" : "Advanced",
         order: activeItem?.position || 1,
-        notesMarkdown: `### ${targetTitle}\n\n- **Course Track**: ${c.track || c.category}\n- **Video Number**: #${activeItem?.position || 1}\n- **YouTube Video ID**: \`${targetVidId}\`\n\nTake active notes while watching, test your understanding with dynamic quizzes, and ask Chintan AI Tutor whenever you need concept clarity.`,
+        notesMarkdown: `### ${targetTitle}\n\n- **Course Track**: ${c.track || c.category}\n- **Video Number**: #${activeItem?.position || 1}\n- **YouTube Video ID**: \`${targetVidId}\`\n\nTake active notes while watching and test your understanding with dynamic quizzes.`,
         keyTakeaways: [
           `Understand key concepts explained in "${targetTitle}"`,
-          "Follow along with live coding and implementation examples",
-          "Ask Chintan AI Tutor for concept clarifications and edge cases"
+          "Follow along with live coding and implementation examples"
         ]
       };
       setActiveLesson(targetLesson);
-
-      setTutorContext({
-        courseTitle: c.title,
-        lessonTitle: targetTitle,
-        topic: c.category,
-        difficulty: targetLesson.difficulty,
-      });
 
       // Load saved notes for this video from localStorage
       try {
@@ -197,17 +185,10 @@ export const CoursePlayer: React.FC<{ courseId: string; initialLessonId?: string
           notesMarkdown: `### ${resource.title}\n\nComprehensive single-video masterclass covering all fundamental concepts.`,
           keyTakeaways: [
             "Comprehensive end-to-end masterclass tutorial",
-            "Build practical projects alongside the video",
-            "Ask Chintan AI Tutor for doubts and explanations"
+            "Build practical projects alongside the video"
           ]
         };
         setActiveLesson(customLesson);
-        setTutorContext({
-          courseTitle: course.title,
-          lessonTitle: resource.title,
-          topic: course.category,
-          difficulty: "Beginner",
-        });
       }
     }
   };
@@ -229,21 +210,13 @@ export const CoursePlayer: React.FC<{ courseId: string; initialLessonId?: string
         topic: course.category,
         difficulty: video.position < 3 ? "Beginner" : video.position < 10 ? "Intermediate" : "Advanced",
         order: video.position,
-        notesMarkdown: `### ${video.title}\n\n- **Course Track**: ${course.track || course.category}\n- **Video Number**: #${video.position}\n- **YouTube Video ID**: \`${video.videoId}\`\n\nTake active notes while watching, test your understanding with dynamic quizzes, and ask Chintan AI Tutor whenever you need concept clarity.`,
+        notesMarkdown: `### ${video.title}\n\n- **Course Track**: ${course.track || course.category}\n- **Video Number**: #${video.position}\n- **YouTube Video ID**: \`${video.videoId}\`\n\nTake active notes while watching and test your understanding with dynamic quizzes.`,
         keyTakeaways: [
           `Master core concepts in "${video.title}"`,
-          "Follow code examples and build practical intuition",
-          "Ask Chintan AI Tutor for concept clarifications and edge cases"
+          "Follow code examples and build practical intuition"
         ]
       };
       setActiveLesson(lesson);
-
-      setTutorContext({
-        courseTitle: course.title,
-        lessonTitle: video.title,
-        topic: course.category,
-        difficulty: lesson.difficulty,
-      });
 
       // Record watch history to backend
       api.recordWatchHistory({
@@ -288,15 +261,15 @@ export const CoursePlayer: React.FC<{ courseId: string; initialLessonId?: string
     return new Set(fromUser);
   }, [user]);
 
-  const isCurrentVideoCompleted = completedIds.has(activeVideoId) || (activeLesson ? completedIds.has(activeLesson.id) : false);
+  const isCurrentVideoCompleted = isLessonCompleted(courseId, activeVideoId) || (activeLesson ? isLessonCompleted(courseId, activeLesson.id) : false);
 
   const totalVideosCount = playlistVideos.length > 0 ? playlistVideos.length : (course?.totalLessons || 1);
   const completedCount = useMemo(() => {
     if (playlistVideos.length > 0) {
-      return playlistVideos.filter(v => completedIds.has(v.videoId) || completedIds.has(`les_${courseId}_${v.videoId}`)).length;
+      return playlistVideos.filter(v => isLessonCompleted(courseId, v.videoId)).length;
     }
     return isCurrentVideoCompleted ? 1 : 0;
-  }, [playlistVideos, completedIds, courseId, isCurrentVideoCompleted]);
+  }, [playlistVideos, courseId, isLessonCompleted, isCurrentVideoCompleted]);
 
   const progressPercentage = Math.min(100, Math.round((completedCount / (totalVideosCount || 1)) * 100));
 
@@ -304,11 +277,10 @@ export const CoursePlayer: React.FC<{ courseId: string; initialLessonId?: string
   const handleCompleteVideo = async () => {
     if (!course || isCurrentVideoCompleted) return;
     try {
-      await api.completeVideo(course.id, activeVideoId, {
+      await markVideoComplete(course.id, activeVideoId, {
         playlistId: activeResource?.playlistId,
         videoTitle: activeVideoTitle,
       });
-      await refreshProfile();
       confetti({ particleCount: 80, spread: 60, origin: { y: 0.6 } });
     } catch (e) {
       console.error("Failed to mark video complete:", e);
@@ -323,29 +295,6 @@ export const CoursePlayer: React.FC<{ courseId: string; initialLessonId?: string
       setNotesSaved(true);
       setTimeout(() => setNotesSaved(false), 2000);
     } catch {}
-  };
-
-  // AI Doubt Submit
-  const handleAskDoubt = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!doubtInput.trim() || doubtLoading || !course) return;
-    setDoubtLoading(true);
-    setDoubtResponse(null);
-    try {
-      const res = await api.askTutor({
-        courseTitle: course.title,
-        lessonTitle: activeVideoTitle,
-        topic: course.category,
-        difficulty: activeLesson?.difficulty || "Beginner",
-        userQuestion: doubtInput,
-        actionType: "Video Playlist Doubt",
-      });
-      setDoubtResponse(res.answer);
-    } catch {
-      setDoubtResponse("Unable to fetch AI explanation right now. Please try again!");
-    } finally {
-      setDoubtLoading(false);
-    }
   };
 
   // Dynamic Quiz Generator
@@ -530,22 +479,6 @@ export const CoursePlayer: React.FC<{ courseId: string; initialLessonId?: string
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                setTutorContext({
-                  courseTitle: course.title,
-                  lessonTitle: activeVideoTitle,
-                  topic: course.category,
-                  difficulty: activeLesson?.difficulty || "Beginner",
-                });
-                setIsTutorOpen(true);
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#18181e] text-orange-400 border border-orange-500/30 hover:bg-[#22222a] text-xs font-mono font-bold transition"
-            >
-              <Bot className="w-4 h-4 text-orange-500" />
-              <span>Ask Chintan AI</span>
-            </button>
-
             <a
               href={youtubeDirectUrl}
               target="_blank"
@@ -636,17 +569,6 @@ export const CoursePlayer: React.FC<{ courseId: string; initialLessonId?: string
             <span>Notes & Scratchpad</span>
           </button>
           <button
-            onClick={() => setActiveTab("ai-doubt")}
-            className={`px-4 py-3 text-xs font-mono font-bold uppercase tracking-wider border-b-2 flex items-center gap-2 transition shrink-0 ${
-              activeTab === "ai-doubt"
-                ? "border-orange-500 text-orange-400"
-                : "border-transparent text-zinc-400 hover:text-zinc-200"
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Ask AI Doubt</span>
-          </button>
-          <button
             onClick={() => {
               setActiveTab("quiz");
               if (quizQuestions.length === 0) handleGenerateQuiz();
@@ -730,47 +652,6 @@ export const CoursePlayer: React.FC<{ courseId: string; initialLessonId?: string
               {activeLesson?.notesMarkdown && (
                 <div className="prose prose-invert prose-sm max-w-none whitespace-pre-wrap font-sans text-zinc-300 leading-relaxed">
                   {activeLesson.notesMarkdown}
-                </div>
-              )}
-            </div>
-          )}
-
-          {activeTab === "ai-doubt" && (
-            <div className="space-y-4 max-w-2xl">
-              <div className="p-4 rounded-xl bg-[#121215] border border-zinc-800 space-y-3">
-                <h4 className="text-xs font-mono font-bold uppercase text-white">Got a technical question?</h4>
-                <p className="text-xs text-zinc-400">
-                  Ask Chintan AI about any algorithm, bug, or concept discussed in{" "}
-                  <strong className="text-orange-400">{activeVideoTitle}</strong>.
-                </p>
-                <form onSubmit={handleAskDoubt} className="space-y-3">
-                  <textarea
-                    rows={3}
-                    placeholder="e.g. 'Can you explain the difference between undefined and null with practical examples?'"
-                    value={doubtInput}
-                    onChange={(e) => setDoubtInput(e.target.value)}
-                    className="w-full bg-[#09090b] text-xs text-white p-3 rounded-lg border border-zinc-800 focus:outline-none focus:border-orange-500 font-mono"
-                  />
-                  <button
-                    type="submit"
-                    disabled={!doubtInput.trim() || doubtLoading}
-                    className="px-4 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-xs font-mono font-bold uppercase tracking-wider flex items-center gap-2 disabled:opacity-50 transition"
-                  >
-                    {doubtLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                    <span>Get AI Explanation</span>
-                  </button>
-                </form>
-              </div>
-
-              {doubtResponse && (
-                <div className="p-4 rounded-xl bg-[#121215] border border-orange-500/30 space-y-2">
-                  <div className="flex items-center gap-2 text-xs font-mono font-bold text-orange-400">
-                    <Bot className="w-4 h-4" />
-                    <span>Chintan AI Explanation</span>
-                  </div>
-                  <div className="text-xs text-zinc-300 font-mono whitespace-pre-wrap leading-relaxed">
-                    {doubtResponse}
-                  </div>
                 </div>
               )}
             </div>

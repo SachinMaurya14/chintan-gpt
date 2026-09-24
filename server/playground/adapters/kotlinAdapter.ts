@@ -4,7 +4,7 @@ import {
   PlaygroundExecutionResponse,
   DiagnosticItem,
 } from "../types.js";
-import { PlaygroundSandbox } from "../sandbox.js";
+import { IsolatedExecutionClient } from "../sandbox.js";
 import path from "path";
 
 export class KotlinAdapter extends BaseLanguageAdapter {
@@ -16,15 +16,11 @@ export class KotlinAdapter extends BaseLanguageAdapter {
     version?: string;
     details?: string;
   }> {
-    const hasKotlinc = await PlaygroundSandbox.isBinaryAvailable("kotlinc");
-    if (hasKotlinc) {
-      const version = await PlaygroundSandbox.getBinaryVersion("kotlinc", "-version");
-      return { available: true, version, details: "Kotlin Compiler" };
-    }
-
+    const health = await IsolatedExecutionClient.checkServiceHealth();
     return {
-      available: false,
-      details: "kotlinc was not found on system PATH.",
+      available: health.available,
+      version: health.version || "Kotlin 2.1 (Isolated Container)",
+      details: health.details,
     };
   }
 
@@ -32,107 +28,70 @@ export class KotlinAdapter extends BaseLanguageAdapter {
     request: PlaygroundExecutionRequest,
     options: { timeoutMs: number; maxOutputBytes: number }
   ): Promise<PlaygroundExecutionResponse> {
-    const runtimeCheck = await this.isRuntimeAvailable();
-    if (!runtimeCheck.available) {
-      return this.createUnavailableResponse(
-        "Kotlin (kotlinc)",
-        "System requires kotlinc and Java runtime installed on the container host."
-      );
+    const validation = IsolatedExecutionClient.validatePayload(request.files, request.stdin);
+    if (!validation.valid) {
+      return this.createResponse("error", "", validation.error || "Invalid payload.", -1, 0);
     }
 
-    const { dir } = await PlaygroundSandbox.createTempWorkspace("kt");
-
-    try {
-      const written = await PlaygroundSandbox.writeProjectFiles(dir, request.files);
-      const ktFiles = written.filter((f) => f.endsWith(".kt"));
-
-      if (ktFiles.length === 0) {
-        return this.createResponse(
-          "error",
-          "",
-          "No Kotlin source files (.kt) found in project workspace.",
-          -1,
-          0
-        );
-      }
-
-      // 1. Compilation
-      const compileArgs = [...ktFiles, "-include-runtime", "-d", "app.jar"];
-      const compileResult = await PlaygroundSandbox.executeCommand("kotlinc", compileArgs, {
-        cwd: dir,
-        timeoutMs: 15000,
-        maxOutputBytes: options.maxOutputBytes,
-      });
-
-      const sanitizedCompileErr = PlaygroundSandbox.sanitizeOutput(compileResult.stderr, dir);
-      const diagnostics = this.parseKotlincDiagnostics(sanitizedCompileErr);
-
-      if (compileResult.exitCode !== 0 || compileResult.timedOut) {
-        return this.createResponse(
-          "compile_error",
-          "",
-          sanitizedCompileErr || "Kotlin compilation failed.",
-          compileResult.exitCode,
-          compileResult.durationMs,
-          diagnostics,
-          compileResult.timedOut ? "Compilation timed out." : undefined,
-          {
-            metadata: {
-              language: "Kotlin",
-              version: runtimeCheck.version,
-              timestamp: new Date().toISOString(),
-            },
-          }
-        );
-      }
-
-      // 2. Execution
-      const runResult = await PlaygroundSandbox.executeCommand("java", ["-jar", "app.jar"], {
-        cwd: dir,
-        stdin: request.stdin,
-        timeoutMs: options.timeoutMs,
-        maxOutputBytes: options.maxOutputBytes,
-      });
-
-      const sanitizedStdout = PlaygroundSandbox.sanitizeOutput(runResult.stdout, dir);
-      const sanitizedStderr = PlaygroundSandbox.sanitizeOutput(runResult.stderr, dir);
-
-      let status: PlaygroundExecutionResponse["status"] = "success";
-      let systemMessage: string | undefined;
-
-      if (runResult.timedOut) {
-        status = "timeout";
-        systemMessage = `Execution timed out after ${options.timeoutMs}ms.`;
-      } else if (runResult.exitCode !== 0) {
-        status = "runtime_error";
-      }
-
+    const ktFiles = request.files.filter((f) => f.name.endsWith(".kt"));
+    if (ktFiles.length === 0) {
       return this.createResponse(
-        status,
-        sanitizedStdout,
-        sanitizedStderr,
-        runResult.exitCode,
-        runResult.durationMs,
-        diagnostics,
-        systemMessage,
-        {
-          metadata: {
-            language: "Kotlin",
-            version: runtimeCheck.version,
-            timestamp: new Date().toISOString(),
-          },
-        }
+        "error",
+        "",
+        "No Kotlin source files (.kt) found in project workspace.",
+        -1,
+        0
       );
-    } finally {
-      await PlaygroundSandbox.cleanup(dir);
     }
+
+    const sourceCode = IsolatedExecutionClient.bundleFiles("kotlin", request.files, request.activeFileName);
+
+    const runResult = await IsolatedExecutionClient.execute({
+      language: "kotlin",
+      sourceCode,
+      stdin: request.stdin,
+      timeoutMs: options.timeoutMs,
+    });
+
+    const sanitizedStdout = IsolatedExecutionClient.sanitizeOutput(runResult.stdout, options.maxOutputBytes);
+    const sanitizedStderr = IsolatedExecutionClient.sanitizeOutput(runResult.stderr, options.maxOutputBytes);
+    const diagnostics = this.parseKotlincDiagnostics(sanitizedStderr);
+
+    let status: PlaygroundExecutionResponse["status"] = "success";
+    let systemMessage: string | undefined;
+
+    if (runResult.timedOut) {
+      status = "timeout";
+      systemMessage = `Execution timed out after ${options.timeoutMs}ms (infinite loop or unhandled I/O).`;
+    } else if (runResult.statusDescription === "Service Unavailable" || runResult.error) {
+      status = "runtime_unavailable";
+      systemMessage = "Secure execution service is currently unavailable. Untrusted host execution is disabled for security.";
+    } else if (runResult.exitCode !== 0) {
+      status = (sanitizedStderr.includes("error:") || !!runResult.compileOutput) ? "compile_error" : "runtime_error";
+    }
+
+    return this.createResponse(
+      status,
+      sanitizedStdout,
+      sanitizedStderr,
+      runResult.exitCode,
+      runResult.durationMs,
+      diagnostics,
+      systemMessage,
+      {
+        metadata: {
+          language: "Kotlin",
+          version: "Kotlin 2.1 (Isolated Container)",
+          timestamp: new Date().toISOString(),
+        },
+      }
+    );
   }
 
   private parseKotlincDiagnostics(errorText: string): DiagnosticItem[] {
     const items: DiagnosticItem[] = [];
     if (!errorText) return items;
 
-    // Pattern: Main.kt:3:5: error: unresolved reference: x
     const regex = /^([a-zA-Z0-9_\-./\\]+\.kt):(\d+):(\d+):\s+(error|warning):\s+(.*)$/gim;
     let match;
 

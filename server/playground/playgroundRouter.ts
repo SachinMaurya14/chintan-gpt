@@ -7,7 +7,12 @@ export const playgroundRouter = Router();
 // Execution endpoint
 playgroundRouter.post("/execute", async (req: Request, res: Response) => {
   try {
-    const payload: PlaygroundExecutionRequest = req.body;
+    const payload: any = req.body || {};
+    if ((!payload.files || payload.files.length === 0) && typeof payload.code === "string") {
+      const lang = payload.language || "python";
+      const ext = lang === "python" ? "py" : lang === "javascript" ? "js" : lang === "cpp" ? "cpp" : "txt";
+      payload.files = [{ name: `main.${ext}`, content: payload.code, isEntry: true }];
+    }
     const result = await PlaygroundServerExecutionService.execute(payload);
     res.json(result);
   } catch (err: any) {

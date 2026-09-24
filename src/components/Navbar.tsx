@@ -10,14 +10,16 @@ import {
   Zap,
   Terminal,
   ArrowRight,
-  Bot
+  Bot,
+  LogOut,
+  LogIn
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext.js";
 import { useApp } from "../context/AppContext.js";
 
 export const Navbar: React.FC = () => {
-  const { user } = useAuth();
-  const { theme, toggleTheme, setIsSearchOpen, isTutorOpen, setIsTutorOpen, setCurrentTab, currentTab } = useApp();
+  const { user, isAuthenticated, logout, setIsAuthModalOpen, setAuthModalMode } = useAuth();
+  const { theme, toggleTheme, setIsSearchOpen, setCurrentTab, currentTab } = useApp();
 
   const userRole = user?.role || "student";
 
@@ -43,6 +45,17 @@ export const Navbar: React.FC = () => {
 
           {/* Direct Nav Links */}
           <nav className="hidden lg:flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-zinc-400">
+            <button
+              onClick={() => setCurrentTab("tutor")}
+              className={`px-3 py-1.5 rounded-lg transition-all btn-press-fx flex items-center gap-1.5 ${
+                currentTab === "tutor"
+                  ? "text-orange-400 bg-orange-500/10 border border-orange-500/30 shadow-sm font-bold"
+                  : "hover:text-orange-400 hover:bg-zinc-900/80 border border-transparent"
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5 text-orange-400" />
+              <span>AI Tutor</span>
+            </button>
             <button
               onClick={() => setCurrentTab("courses")}
               className={`px-3 py-1.5 rounded-lg transition-all btn-press-fx ${
@@ -122,20 +135,6 @@ export const Navbar: React.FC = () => {
             </div>
           )}
 
-          {/* Chintan AI Tutor Trigger Button */}
-          <button
-            id="btn-toggle-ai-tutor"
-            onClick={() => setIsTutorOpen(!isTutorOpen)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all btn-press-fx ${
-              isTutorOpen
-                ? "bg-purple-500/20 text-purple-300 border border-purple-500/50 shadow-md shadow-purple-500/20"
-                : "bg-[#111116] text-zinc-300 hover:text-white border border-purple-500/30 hover:border-purple-500/60 shadow-sm hover:shadow-purple-500/10"
-            }`}
-          >
-            <Bot className="w-3.5 h-3.5 text-purple-400" />
-            <span className="hidden sm:inline">AI TUTOR</span>
-          </button>
-
           {/* Primary CTA button */}
           <button
             id="btn-primary-header-action"
@@ -146,34 +145,58 @@ export const Navbar: React.FC = () => {
             <ArrowRight className="w-3 h-3" />
           </button>
 
-          {/* Real Authenticated Role Badge */}
-          <div
-            id="user-role-badge"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-mono font-semibold border border-zinc-800/90 bg-[#0e0e13]"
-          >
-            {userRole === "admin" ? (
-              <>
-                <Shield className="w-3.5 h-3.5 text-rose-400" />
-                <span className="font-bold text-rose-400 hidden sm:inline">ADMIN</span>
-              </>
-            ) : (
-              <>
-                <GraduationCap className="w-3.5 h-3.5 text-cyan-400" />
-                <span className="font-bold text-zinc-300 hidden sm:inline">STUDENT</span>
-              </>
-            )}
-          </div>
-
-          {/* User Profile */}
-          {user && (
+          {/* Authenticated Controls vs Sign In */}
+          {isAuthenticated && user ? (
             <div className="flex items-center gap-2">
+              {/* Role Badge */}
+              <div
+                id="user-role-badge"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-mono font-semibold border border-zinc-800/90 bg-[#0e0e13]"
+              >
+                {user.role === "admin" ? (
+                  <>
+                    <Shield className="w-3.5 h-3.5 text-rose-400" />
+                    <span className="font-bold text-rose-400 hidden sm:inline">ADMIN</span>
+                  </>
+                ) : (
+                  <>
+                    <GraduationCap className="w-3.5 h-3.5 text-cyan-400" />
+                    <span className="font-bold text-zinc-300 hidden sm:inline">STUDENT</span>
+                  </>
+                )}
+              </div>
+
+              {/* User Avatar */}
               <img
                 src={user.avatar}
                 alt={user.name}
                 className="w-7 h-7 rounded-lg object-cover ring-1 ring-zinc-700 shadow-sm hidden sm:block"
-                title={user.name}
+                title={`${user.name} (${user.email})`}
               />
+
+              {/* Logout Button */}
+              <button
+                id="btn-logout"
+                onClick={() => logout()}
+                className="p-1.5 rounded-lg text-zinc-400 hover:text-rose-400 hover:bg-zinc-900 border border-transparent hover:border-zinc-800 transition btn-press-fx"
+                title="Sign Out"
+                aria-label="Sign Out"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
             </div>
+          ) : (
+            <button
+              id="btn-sign-in"
+              onClick={() => {
+                setAuthModalMode("login");
+                setIsAuthModalOpen(true);
+              }}
+              className="px-3 py-1.5 rounded-lg bg-zinc-800/90 hover:bg-zinc-700 text-zinc-200 hover:text-white border border-zinc-700/60 text-xs font-semibold uppercase tracking-wider transition btn-press-fx flex items-center gap-1.5 shadow-sm"
+            >
+              <LogIn className="w-3.5 h-3.5 text-orange-400" />
+              <span>Sign In</span>
+            </button>
           )}
         </div>
       </div>

@@ -2,15 +2,14 @@ import { GoogleGenAI } from "@google/genai";
 
 let aiClient: GoogleGenAI | null = null;
 
-// Use server-side Gemini API key securely
-const SERVER_GEMINI_KEY =
-  process.env.GEMINI_API_KEY ||
-  "AQ.Ab8RN6K6JyzjBzR6vNINLoE6JXL1Ry1Og_F4HSeg9wX3y72Vxw";
-
 function getAI(): GoogleGenAI {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY is not configured in environment variables.");
+  }
   if (!aiClient) {
     aiClient = new GoogleGenAI({
-      apiKey: SERVER_GEMINI_KEY,
+      apiKey,
       httpOptions: {
         headers: {
           'User-Agent': 'aistudio-build',
@@ -48,10 +47,13 @@ function setCache(key: string, data: any): void {
   }
 }
 
-// Multi-model cascading list for text tutor tasks
-const PRIMARY_TEXT_MODEL = "gemini-3.7-flash";
+// Multi-model cascading list for text and generative tasks
+const PRIMARY_TEXT_MODEL = "gemini-2.5-flash";
 const CANDIDATE_MODELS = [
+  "gemini-2.5-flash",
+  "gemini-3.8-flash",
   "gemini-3.7-flash",
+  "gemini-3-flash-preview",
   "gemini-3.1-flash-lite",
   "gemini-flash-latest"
 ];
@@ -765,47 +767,47 @@ Visual Style: Professional dark-theme technical schematic (#09090b dark slate ba
   const canAttemptImage = Date.now() > imageQuotaExceededUntil;
 
   if (canAttemptImage) {
-    for (const model of FALLBACK_IMAGE_MODELS) {
-      try {
-        const imageConfig = model.includes("lite")
-          ? { aspectRatio: "16:9" }
-          : { aspectRatio: "16:9", imageSize: "1K" };
+    const primaryModel = FALLBACK_IMAGE_MODELS[0] || "gemini-3.1-flash-image";
+    try {
+      const imageConfig = primaryModel.includes("lite")
+        ? { aspectRatio: "16:9" }
+        : { aspectRatio: "16:9", imageSize: "1K" };
 
-        const response = await ai.models.generateContent({
-          model,
-          contents: {
-            parts: [
-              {
-                text: imagePrompt,
-              },
-            ],
-          },
-          config: {
-            imageConfig,
-          },
-        });
+      // Race with a 3.5s timeout so the user never experiences a hanging prompt
+      const genPromise = ai.models.generateContent({
+        model: primaryModel,
+        contents: {
+          parts: [{ text: imagePrompt }],
+        },
+        config: { imageConfig },
+      });
 
-        const parts = response.candidates?.[0]?.content?.parts || [];
-        for (const part of parts) {
-          const inline = part.inlineData || (part as any).inline_data;
-          if (inline && (inline.data || inline.bytes)) {
-            const mime = inline.mimeType || (inline as any).mime_type || "image/png";
-            const rawData = inline.data || (inline as any).bytes;
-            const base64Data = typeof rawData === "string" ? rawData : Buffer.from(rawData).toString("base64");
-            const imageUrl = `data:${mime};base64,${base64Data}`;
-            setCache(cacheKey, imageUrl);
-            return imageUrl;
-          }
+      const timeoutPromise = new Promise<null>((_, reject) =>
+        setTimeout(() => reject(new Error("Image generation timed out")), 3500)
+      );
+
+      const response: any = await Promise.race([genPromise, timeoutPromise]);
+
+      const parts = response?.candidates?.[0]?.content?.parts || [];
+      for (const part of parts) {
+        const inline = part.inlineData || (part as any).inline_data;
+        if (inline && (inline.data || inline.bytes)) {
+          const mime = inline.mimeType || (inline as any).mime_type || "image/png";
+          const rawData = inline.data || (inline as any).bytes;
+          const base64Data = typeof rawData === "string" ? rawData : Buffer.from(rawData).toString("base64");
+          const imageUrl = `data:${mime};base64,${base64Data}`;
+          setCache(cacheKey, imageUrl);
+          return imageUrl;
         }
-      } catch (err: any) {
-        const isQuotaError =
-          err?.status === "RESOURCE_EXHAUSTED" ||
-          err?.code === 429 ||
-          (err?.message && (err.message.includes("429") || err.message.includes("quota") || err.message.includes("RESOURCE_EXHAUSTED")));
+      }
+    } catch (err: any) {
+      const isQuotaError =
+        err?.status === "RESOURCE_EXHAUSTED" ||
+        err?.code === 429 ||
+        (err?.message && (err.message.includes("429") || err.message.includes("quota") || err.message.includes("RESOURCE_EXHAUSTED")));
 
-        if (isQuotaError) {
-          imageQuotaExceededUntil = Date.now() + 60 * 1000;
-        }
+      if (isQuotaError) {
+        imageQuotaExceededUntil = Date.now() + 60 * 1000;
       }
     }
   }
@@ -819,25 +821,12 @@ Visual Style: Professional dark-theme technical schematic (#09090b dark slate ba
 }
 
 // =========================================================================
-// 1. CHINTAN AI TUTOR (UPGRADED WITH GEMINI 3.7 FLASH & VISUAL EXPLANATIONS)
+// 1. SEARCH GROUNDING & KNOWLEDGE RETRIEVAL
 // =========================================================================
-
-export interface TutorHistoryMessage {
-  sender: "ai" | "user";
-  text: string;
-}
 
 export interface GroundingSource {
   title: string;
   uri: string;
-}
-
-export interface TutorResponse {
-  answer: string;
-  imageUrl?: string;
-  visualTopic?: string;
-  isGrounded?: boolean;
-  sources?: GroundingSource[];
 }
 
 let searchGroundingQuotaExceededUntil = 0;
@@ -863,7 +852,7 @@ export async function performSearchGrounding(params: {
 
   if (canAttemptSearch) {
     const ai = getAI();
-    const searchModels = ["gemini-3.7-flash", "gemini-flash-latest", "gemini-2.5-flash"];
+    const searchModels = ["gemini-2.5-flash", "gemini-3-flash-preview", "gemini-3.8-flash", "gemini-3.7-flash", "gemini-flash-latest"];
     
     for (const model of searchModels) {
       try {
@@ -934,415 +923,6 @@ export async function performSearchGrounding(params: {
   };
   setCache(cacheKey, fallbackResult);
   return fallbackResult;
-}
-
-function shouldTriggerSearchGrounding(query: string, actionType: string): boolean {
-  const q = query.toLowerCase();
-  
-  if (actionType === "Live Search" || actionType === "Latest Hiring Updates" || actionType === "Company News") {
-    return true;
-  }
-
-  const timeSensitiveTerms = [
-    "latest", "current", "today", "2026", "2025", "recent", "upcoming",
-    "hiring pattern", "hiring process", "recruitment drive", "nqt", "off-campus",
-    "eligibility criteria", "package trend", "salary package", "cutoff", "cut-off",
-    "new pattern", "updated syllabus", "company news", "hiring trend", "recruitment updates"
-  ];
-
-  const hasTimeSensitiveTerm = timeSensitiveTerms.some(term => q.includes(term));
-  if (!hasTimeSensitiveTerm) return false;
-
-  const staticDsCsExclusions = [
-    "binary search", "linked list", "recursion", "dynamic programming", "time complexity",
-    "merge sort", "quick sort", "binary tree", "graph traversal", "heap", "pointer in c",
-    "what is an array", "how to reverse", "two sum", "bubble sort", "bitwise"
-  ];
-
-  const isStaticFundamentals = staticDsCsExclusions.some(ex => q.includes(ex) && !q.includes("hiring") && !q.includes("pattern"));
-  return !isStaticFundamentals;
-}
-
-export async function askChintanTutor(params: {
-  problemTitle?: string;
-  problemStatement?: string;
-  topic?: string;
-  difficulty?: string;
-  company?: string;
-  courseTitle?: string;
-  moduleTitle?: string;
-  lessonTitle?: string;
-  userQuestion: string;
-  actionType?: string;
-  contextCode?: string;
-  recentMistakes?: string;
-  conversationHistory?: TutorHistoryMessage[];
-  requestVisual?: boolean;
-}): Promise<TutorResponse> {
-  const {
-    problemTitle,
-    problemStatement,
-    company,
-    courseTitle,
-    moduleTitle,
-    lessonTitle,
-    topic = problemTitle ? "Data Structures & Algorithms" : "Computer Science",
-    difficulty = "Intermediate",
-    userQuestion,
-    actionType = "General Doubt",
-    contextCode,
-    recentMistakes,
-    conversationHistory = [],
-    requestVisual = false,
-  } = params;
-
-  const currentTopic = topic || "Computer Science";
-  const currentSubject = problemTitle || lessonTitle || (company ? `${company} Recruitment Prep` : currentTopic);
-
-  // Build cache key based on prompt, subject and question
-  const historySnippet = conversationHistory.slice(-2).map(m => m.text.slice(0, 30)).join("|");
-  const cacheKey = `tutor_v4:${problemTitle || 'noproblem'}:${company || 'nocompany'}:${currentTopic}:${actionType}:${userQuestion.trim().toLowerCase()}:${historySnippet}:${requestVisual ? 'vis' : 'novis'}`;
-  const cached = getCached<TutorResponse>(cacheKey);
-  if (cached) return cached;
-
-  // 1. Check if query requires Real-Time Google Search Grounding
-  if (shouldTriggerSearchGrounding(userQuestion, actionType)) {
-    const groundedContext = problemTitle
-      ? `Problem: ${problemTitle} (${currentTopic}, ${difficulty})`
-      : company
-        ? `Company: ${company} Technical Hiring`
-        : `${courseTitle || "CS Course"} > ${currentTopic} (${lessonTitle || "Lesson"})`;
-
-    const groundedResult = await performSearchGrounding({
-      query: userQuestion,
-      context: groundedContext
-    });
-
-    const result: TutorResponse = {
-      answer: groundedResult.answer,
-      isGrounded: groundedResult.isGrounded,
-      sources: groundedResult.sources,
-    };
-    setCache(cacheKey, result);
-    return result;
-  }
-
-  const systemInstruction = `You are Chintan AI, an elite, patient, human, and deeply insightful Computer Science Tutor & Engineering Mentor on Chintan GPT.
-
-Core Persona & Natural Tone:
-- Talk like a brilliant, friendly senior engineer or professor mentoring a student 1-on-1.
-- Sound natural, warm, conversational, and direct.
-- NEVER sound like a robotic, corporate, or repetitive AI chatbot.
-- Strictly AVOID generic AI filler clichés such as:
-  "Think of this as...", "Let's build digital empires...", "I am thrilled to guide you...", "In the vast world of...", "Greetings, coding enthusiast!".
-- Answer the student's actual question immediately first. Do NOT repeat or paraphrase the student's question back to them.
-- Keep the length proportional: concise and crystal clear for simple doubts; deeply rigorous with technical accuracy for advanced questions.
-- If the student expresses confusion, simplify intuitively with a clean mini-example rather than writing longer, more convoluted paragraphs.
-- Use real-world analogies ONLY when they genuinely illuminate the mental model.
-- Do NOT output unsolicited motivational speeches or promotional marketing text.
-
-CRITICAL CONTEXT SYNCHRONIZATION RULES:
-- You must ALWAYS explain the EXACT currently active problem, topic, company, or course provided in the prompt.
-- If the active problem is "Two Sum" (Topic: Arrays, Difficulty: Easy), focus strictly and specifically on Two Sum and Hash Map / Array techniques.
-- If the active problem is "Binary Search", focus strictly on Binary Search and logarithmic divide-and-conquer.
-- If the active target company is "Google" or another company, tailor your explanation to that company's hiring standards and technical questions.
-- If the active course is "React", explain React Virtual DOM, state, and hooks.
-- NEVER use stale or default context (such as "Full Stack Web Mastery") when a specific problem or topic is selected.
-
-Multi-Language & Dialect Adaptation:
-- Automatically match the language, dialect, and tone of the student's message.
-- If the student writes in Hinglish (e.g., "Bhai recursion mein stack overflow kyu hota hai?", "Is problem ka time complexity kya hoga?"), reply naturally in fluent, helpful Hinglish.
-- If the student writes in Hindi, reply in clear, natural Hindi.
-- If the student writes in English, reply in natural English.
-- NEVER translate fundamental CS keywords (e.g. keep "API", "function", "variable", "recursion", "array", "pointer", "database", "stack", "queue", "loop", "time complexity", "memoization", "binary tree").
-- Maintain the student's preferred language throughout the ongoing conversation.
-
-Pedagogical Structure by Task:
-1. Simple Concept:
-   - Short definition
-   - Simple intuitive explanation
-   - Compact illustrative example
-2. Challenging / Complex Concept:
-   - What it is
-   - Why it is needed (the problem it solves)
-   - How it works (step-by-step intuition)
-   - Practical example / trace
-   - Common pitfall / interview trap
-   - Short mental takeaway
-3. Coding Question / LeetCode:
-   - Explain the approach & intuition first
-   - Provide clean, robust code with syntax highlighting
-   - Explain the critical lines
-   - State Time & Space Complexity (e.g., O(N) time, O(1) space)
-   - Point out subtle bugs or edge cases
-4. Debugging & Error Assistance:
-   - Identify the exact bug and relevant line(s)
-   - Explain WHY the error happens
-   - Provide the corrected version with the fix clearly highlighted
-
-Markdown Formatting:
-- Use clean Markdown with headers (###), bold key terms, bullet points, clean tables where useful, and language-tagged code blocks (\`\`\`python, \`\`\`cpp, \`\`\`java, \`\`\`javascript, \`\`\`typescript, \`\`\`sql).`;
-
-  // Build conversational multi-turn contents
-  const contents: any[] = [];
-
-  if (Array.isArray(conversationHistory) && conversationHistory.length > 0) {
-    const recent = conversationHistory.slice(-6);
-    for (const msg of recent) {
-      if (msg.text && msg.text.trim()) {
-        contents.push({
-          role: msg.sender === "user" ? "user" : "model",
-          parts: [{ text: msg.text }]
-        });
-      }
-    }
-  }
-
-  // Current prompt
-  let promptText = `[Action: ${actionType}]\n`;
-  if (problemTitle) {
-    promptText += `ACTIVE CODING PROBLEM: ${problemTitle}\n`;
-    promptText += `Topic: ${currentTopic} | Difficulty: ${difficulty}\n`;
-    if (company) promptText += `Company Tags: ${company}\n`;
-    if (problemStatement) promptText += `Problem Statement:\n${problemStatement.slice(0, 1500)}\n`;
-  } else if (company) {
-    promptText += `ACTIVE COMPANY FOCUS: ${company}\n`;
-    promptText += `Track: ${currentTopic} | Level: ${difficulty}\n`;
-  } else if (courseTitle) {
-    promptText += `ACTIVE COURSE LESSON: ${courseTitle} > ${moduleTitle || 'Core'} > ${lessonTitle || currentTopic}\n`;
-    promptText += `Topic: ${currentTopic} | Difficulty: ${difficulty}\n`;
-  } else {
-    promptText += `ACTIVE TOPIC: ${currentTopic} (${difficulty})\n`;
-  }
-
-  if (contextCode) {
-    promptText += `Student Code Context:\n\`\`\`\n${contextCode}\n\`\`\`\n`;
-  }
-  if (recentMistakes) {
-    promptText += `Recent Student Mistakes: ${recentMistakes}\n`;
-  }
-  promptText += `Student: ${userQuestion}`;
-
-  contents.push({
-    role: "user",
-    parts: [{ text: promptText }]
-  });
-
-  let aiText = await generateWithFallback({
-    contents,
-    config: {
-      systemInstruction,
-      temperature: 0.7,
-    }
-  });
-
-  if (!aiText) {
-    aiText = generateTutorFallback({
-      problemTitle,
-      problemStatement,
-      topic: currentTopic,
-      difficulty,
-      company,
-      courseTitle,
-      lessonTitle: lessonTitle || problemTitle || currentTopic,
-      actionType,
-      userQuestion,
-      contextCode
-    });
-  }
-
-  // Determine whether an educational visual diagram should be generated
-  const visualKeywords = [
-    "linked list", "doubly linked", "singly linked", "circular linked",
-    "binary tree", "bst", "trie", "avl tree", "red black tree", "segment tree", "heap", "min heap", "max heap",
-    "graph", "bfs", "dfs", "dijkstra", "topological sort", "bipartite",
-    "stack", "queue", "deque", "call stack", "recursion tree",
-    "binary search", "two sum", "two pointer", "sliding window", "merge sort", "quick sort",
-    "dynamic programming", "dp", "memoization", "knapsack",
-    "system design", "architecture", "microservices", "load balancer", "message queue", "cache aside",
-    "react", "virtual dom", "component",
-    "flowchart", "diagram", "visualize", "visualization", "draw", "schematic"
-  ];
-
-  const qLower = userQuestion.toLowerCase();
-  const topicLower = currentTopic.toLowerCase();
-  const subjectLower = currentSubject.toLowerCase();
-  const isExplicitVisual =
-    requestVisual ||
-    actionType === "Visual Diagram" ||
-    actionType === "Explain with Visual" ||
-    qLower.includes("diagram") ||
-    qLower.includes("visual") ||
-    qLower.includes("flowchart") ||
-    qLower.includes("draw") ||
-    qLower.includes("architecture");
-
-  const hasVisualSubject = visualKeywords.some(
-    kw => qLower.includes(kw) || topicLower.includes(kw) || subjectLower.includes(kw)
-  );
-
-  let imageUrl: string | undefined = undefined;
-  let visualTopic: string | undefined = undefined;
-
-  // Generate visual only if explicit or genuinely beneficial
-  if (isExplicitVisual || (hasVisualSubject && qLower.length > 3)) {
-    const conceptToDraw = problemTitle
-      ? `${problemTitle} (${currentTopic})`
-      : company
-        ? `${company} Placement Technical Pipeline`
-        : currentTopic && currentTopic !== "Computer Science"
-          ? `${currentTopic}: ${lessonTitle || currentTopic}`
-          : userQuestion.replace(/^(explain|what is|how does|tell me about|draw|show)\s+/i, "").slice(0, 60);
-
-    try {
-      const img = await generateVisualDiagram({
-        concept: conceptToDraw,
-        context: `${problemTitle ? `Problem: ${problemTitle}. ` : ""}${currentTopic ? `Topic: ${currentTopic}. ` : ""}${aiText.slice(0, 300)}`
-      });
-      if (img) {
-        imageUrl = img;
-        visualTopic = conceptToDraw;
-      }
-    } catch (e) {
-      console.warn("[AI Visual] Skipped image generation:", e);
-    }
-  }
-
-  const result: TutorResponse = {
-    answer: aiText,
-    imageUrl,
-    visualTopic
-  };
-
-  setCache(cacheKey, result);
-  return result;
-}
-
-function generateTutorFallback(params: {
-  problemTitle?: string;
-  problemStatement?: string;
-  topic: string;
-  difficulty: string;
-  company?: string;
-  courseTitle?: string;
-  lessonTitle: string;
-  actionType: string;
-  userQuestion: string;
-  contextCode?: string;
-}): string {
-  const { problemTitle, problemStatement, topic, difficulty, company, lessonTitle, actionType, userQuestion, contextCode } = params;
-
-  // 1. Two Sum specific fallback
-  if (problemTitle && problemTitle.toLowerCase().includes("two sum")) {
-    if (actionType === "Give Hint" || userQuestion.toLowerCase().includes("hint")) {
-      return `### 💡 Two Sum — Progressive Hint
-1. **Brute Force vs Hash Map:** Checking every pair takes $\\mathcal{O}(N^2)$. Can we do it in a single pass?
-2. **Complement Lookup:** For each number \`nums[i]\`, what number are we looking for? It's \`target - nums[i]\`.
-3. **Storage:** Store each number's value as the key and its index as the value in a Hash Map as you iterate.`;
-    }
-
-    return `### 💡 Two Sum — Optimal Hash Map Solution
-
-**Core Intuition:**
-We need to find two distinct indices \`[i, j]\` such that \`nums[i] + nums[j] == target\`.
-
-Instead of a double loop ($\\mathcal{O}(N^2)$), we maintain a **Hash Map** that remembers numbers we have already seen and their indices:
-1. For each number \`nums[i]\`, compute \`complement = target - nums[i]\`.
-2. Check if \`complement\` exists in our map:
-   - If yes: return \`[map[complement], i]\`.
-   - If no: record \`map[nums[i]] = i\`.
-
-\`\`\`python
-def twoSum(nums: list[int], target: int) -> list[int]:
-    seen = {} # value -> index
-    for i, num in enumerate(nums):
-        complement = target - num
-        if complement in seen:
-            return [seen[complement], i]
-        seen[num] = i
-    return []
-\`\`\`
-
-**Complexity Analysis:**
-- **Time Complexity:** $\\mathcal{O}(N)$ — Single pass through the array.
-- **Space Complexity:** $\\mathcal{O}(N)$ — Hash map stores up to $N$ elements.`;
-  }
-
-  // 2. Binary Search specific fallback
-  if (problemTitle && problemTitle.toLowerCase().includes("binary search")) {
-    if (actionType === "Give Hint" || userQuestion.toLowerCase().includes("hint")) {
-      return `### 💡 Binary Search — Progressive Hint
-1. **Sorted Guarantee:** Because the array is sorted, comparing the target to the middle element lets you eliminate half the remaining search space.
-2. **Pointer Adjustment:** If \`nums[mid] < target\`, move \`low = mid + 1\`. If \`nums[mid] > target\`, move \`high = mid - 1\`.
-3. **Mid Calculation:** Use \`mid = low + (high - low) // 2\` to safely prevent integer overflow.`;
-    }
-
-    return `### 🔍 Binary Search — Optimal Logarithmic Search
-
-**Core Intuition:**
-Binary search cuts the sorted search interval in half with every comparison:
-1. Initialize pointers: \`low = 0\`, \`high = len(nums) - 1\`.
-2. While \`low <= high\`:
-   - Compute \`mid = low + (high - low) // 2\`.
-   - If \`nums[mid] == target\`: return \`mid\`.
-   - If \`nums[mid] < target\`: target must be in right half $\\rightarrow$ \`low = mid + 1\`.
-   - If \`nums[mid] > target\`: target must be in left half $\\rightarrow$ \`high = mid - 1\`.
-3. If loop ends without finding target, return \`-1\`.
-
-\`\`\`cpp
-int binarySearch(vector<int>& nums, int target) {
-    int low = 0, high = nums.size() - 1;
-    while (low <= high) {
-        int mid = low + (high - low) / 2;
-        if (nums[mid] == target) return mid;
-        if (nums[mid] < target) low = mid + 1;
-        else high = mid - 1;
-    }
-    return -1;
-}
-\`\`\`
-
-**Complexity Analysis:**
-- **Time Complexity:** $\\mathcal{O}(\\log N)$ — Dividing search range by 2 at each step.
-- **Space Complexity:** $\\mathcal{O}(1)$ — Pure in-place pointers.`;
-  }
-
-  // 3. Hints
-  if (actionType === "Give Hint" || actionType.toLowerCase().includes("hint")) {
-    return `### 💡 Progressive Hint for **${lessonTitle}** (${topic})
-1. **Identify the Core Invariant:** What property or state remains true across each step of the algorithm?
-2. **Look for Invariants:** Can you reduce the problem into smaller independent subproblems?
-3. **Edge Case Watch:** Check single-element inputs, empty collections, and extreme bounds.
-4. **Complexity Target:** Aim for the optimal time complexity ($\\mathcal{O}(N)$ or $\\mathcal{O}(N \\log N)$).`;
-  }
-
-  // 4. Debugging
-  if (actionType === "Debug My Code" || contextCode) {
-    return `### 🔍 Code Analysis & Debugging Guide for **${problemTitle || topic}**
-${contextCode ? `**Inspected Code:**\n\`\`\`\n${contextCode}\n\`\`\`\n` : ''}
-1. **Boundary & Base Cases:**
-   - Verify 0-based array indexing to avoid out-of-bounds errors (\`i < n\` vs \`i <= n\`).
-   - If using recursion, ensure the base condition terminates before calling recursive steps.
-2. **State Mutation:**
-   - Ensure variables and accumulator state are properly reset per iteration or test case.
-3. **Complexity & Optimization:**
-   - Eliminate redundant inner-loop allocations or nested scans.`;
-  }
-
-  // 5. Default domain intuition
-  const activeName = problemTitle || lessonTitle || (company ? `${company} Preparation` : topic);
-  return `### 🎓 Deep Intuition: **${activeName}** (${topic}, ${difficulty})
-
-**Core Concept:**
-When working on **${activeName}**, focus on establishing clear and deterministic state transitions:
-
-1. **Input Guard & Constraints:** Validate boundaries, null/empty collections, and constraints first.
-2. **Optimal Strategy:** Utilize the standard pattern suited for this problem class (such as two-pointers, hash map complement indexing, or divide-and-conquer).
-3. **Complexity Guarantees:**
-   - **Time Complexity:** $\\mathcal{O}(N)$ or $\\mathcal{O}(N \\log N)$ optimal bound.
-   - **Space Complexity:** $\\mathcal{O}(1)$ auxiliary space if in-place, or $\\mathcal{O}(N)$ if auxiliary buffers are required.
-
-Feel free to ask for complete solution code, edge cases, or a step-by-step dry run trace!`;
 }
 
 // =========================================================================

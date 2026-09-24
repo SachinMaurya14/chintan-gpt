@@ -49,7 +49,7 @@ import {
 } from "../../data/questionLoaders.js";
 
 export const CompanyPrepHub: React.FC = () => {
-  const { selectedCompanyId, setSelectedCompanyId, navigateToProblem, setCurrentTab, setIsTutorOpen, setTutorContext } = useApp();
+  const { selectedCompanyId, setSelectedCompanyId, navigateToProblem, setCurrentTab } = useApp();
   const { user, setTargetCompanies } = useAuth();
   const [companies, setCompanies] = useState<CompanyPrep[]>([]);
   const [problems, setProblems] = useState<CodingProblem[]>([]);
@@ -276,23 +276,6 @@ export const CompanyPrepHub: React.FC = () => {
                 >
                   <Cpu className="w-3.5 h-3.5 text-amber-400" />
                   <span>Core CS Engine</span>
-                </button>
-
-                <button
-                  id="btn-live-hiring-trends"
-                  onClick={() => {
-                    setTutorContext({
-                      courseTitle: "Placement & Hiring Intelligence",
-                      topic: `${activeCompany.name} 2026 Hiring Pattern & Recruitment Process`,
-                      lessonTitle: "Latest Syllabus, Eligibility & Pattern",
-                      difficulty: "Advanced",
-                    });
-                    setIsTutorOpen(true);
-                  }}
-                  className="w-full sm:w-auto px-3.5 py-2.5 rounded-lg bg-emerald-950/40 hover:bg-emerald-900/50 text-emerald-400 border border-emerald-500/30 text-xs font-mono font-bold uppercase tracking-wider transition flex items-center justify-center gap-1.5 shadow-sm"
-                >
-                  <Globe className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>2026 Hiring Updates</span>
                 </button>
 
                 <button

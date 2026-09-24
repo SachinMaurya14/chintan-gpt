@@ -307,14 +307,6 @@ export interface GroundingSource {
   uri: string;
 }
 
-export interface TutorResponsePayload {
-  answer: string;
-  imageUrl?: string;
-  visualTopic?: string;
-  isGrounded?: boolean;
-  sources?: GroundingSource[];
-}
-
 export interface VisualDiagramResponse {
   imageUrl: string;
   concept: string;

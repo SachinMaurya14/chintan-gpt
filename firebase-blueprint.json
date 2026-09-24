@@ -1,0 +1,205 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User account profile and learning progress record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique user identifier" },
+        "name": { "type": "string", "description": "Full display name" },
+        "email": { "type": "string", "format": "email", "description": "Primary user email address" },
+        "role": { "type": "string", "enum": ["student", "admin"], "description": "Authorization role" },
+        "passwordHash": { "type": "string", "description": "Bcrypt-hashed password" },
+        "avatar": { "type": "string", "description": "Avatar image URL" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Account registration timestamp" },
+        "lastActive": { "type": "string", "format": "date-time", "description": "Last user activity timestamp" },
+        "streak": { "type": "number", "description": "Current active daily streak" },
+        "longestStreak": { "type": "number", "description": "All-time longest streak" },
+        "lastQualifyingDate": { "type": "string", "description": "Date string YYYY-MM-DD of last qualifying activity" },
+        "xp": { "type": "number", "description": "Total experience points earned" },
+        "level": { "type": "number", "description": "Platform mastery level" },
+        "solvedProblemIds": { "type": "array", "description": "Array of solved problem identifiers" },
+        "problemsAttempted": { "type": "number", "description": "Count of coding problems attempted" },
+        "completedLessonIds": { "type": "array", "description": "Array of completed course lesson identifiers" },
+        "enrolledCourseIds": { "type": "array", "description": "Array of enrolled course identifiers" },
+        "targetCompanies": { "type": "array", "description": "Target placement company identifiers" },
+        "quizzesCompleted": { "type": "number", "description": "Total quizzes completed" },
+        "learningMinutes": { "type": "number", "description": "Total minutes spent on platform" },
+        "weakTopics": { "type": "array", "description": "Identified weak algorithmic or system design topics" },
+        "streakHistory": { "type": "array", "description": "Past 30 days streak record" },
+        "tokenVersion": { "type": "number", "description": "Session token generation version for global invalidation" }
+      },
+      "required": ["id", "name", "email", "role", "createdAt"]
+    },
+    "Course": {
+      "title": "Course",
+      "description": "Structured curriculum track with modules and lessons",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique course identifier" },
+        "title": { "type": "string", "description": "Course title" },
+        "slug": { "type": "string", "description": "URL-friendly slug" },
+        "description": { "type": "string", "description": "Detailed curriculum syllabus description" },
+        "level": { "type": "string", "description": "Target difficulty level" },
+        "duration": { "type": "string", "description": "Estimated completion hours" },
+        "thumbnail": { "type": "string", "description": "Cover thumbnail URL" },
+        "tags": { "type": "array", "description": "Topic tags" },
+        "instructor": { "type": "string", "description": "Instructor or curriculum creator name" },
+        "modules": { "type": "array", "description": "Ordered list of course modules and lessons" }
+      },
+      "required": ["id", "title", "slug"]
+    },
+    "CodingProblem": {
+      "title": "CodingProblem",
+      "description": "LeetCode-style algorithmic challenge definition",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique problem identifier" },
+        "title": { "type": "string", "description": "Problem title" },
+        "slug": { "type": "string", "description": "URL-friendly slug" },
+        "difficulty": { "type": "string", "enum": ["Easy", "Medium", "Hard"], "description": "Difficulty rating" },
+        "topics": { "type": "array", "description": "Algorithmic topic tags" },
+        "companyTags": { "type": "array", "description": "Companies asking this problem" },
+        "acceptanceRate": { "type": "number", "description": "Global acceptance rate percentage" },
+        "description": { "type": "string", "description": "Full Markdown problem description" }
+      },
+      "required": ["id", "title", "slug", "difficulty"]
+    },
+    "CompanyPrep": {
+      "title": "CompanyPrep",
+      "description": "Company-specific interview prep roadmap and syllabus",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique company identifier" },
+        "name": { "type": "string", "description": "Company name" },
+        "logo": { "type": "string", "description": "Company logo URL" },
+        "description": { "type": "string", "description": "Company overview and recruitment patterns" },
+        "industry": { "type": "string", "description": "Industry domain" },
+        "hiringRoles": { "type": "array", "description": "Primary hiring role profiles" },
+        "rounds": { "type": "array", "description": "Interview stages" },
+        "tips": { "type": "array", "description": "Preparation advice" },
+        "syllabus": { "type": "array", "description": "Topic breakdown" },
+        "codingQuestions": { "type": "array", "description": "Key coding question references" }
+      },
+      "required": ["id", "name"]
+    },
+    "ProblemSubmission": {
+      "title": "ProblemSubmission",
+      "description": "Code execution result and submission log owned by a user",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique submission identifier" },
+        "problemId": { "type": "string", "description": "Target coding problem ID" },
+        "userId": { "type": "string", "description": "Author user identifier" },
+        "code": { "type": "string", "description": "Submitted source code" },
+        "language": { "type": "string", "description": "Programming language" },
+        "status": { "type": "string", "description": "Evaluation status (Accepted, Wrong Answer, etc.)" },
+        "runtimeMs": { "type": "number", "description": "Execution runtime in milliseconds" },
+        "memoryKb": { "type": "number", "description": "Memory consumed in kilobytes" },
+        "testcasesPassed": { "type": "number", "description": "Number of passed test cases" },
+        "totalTestcases": { "type": "number", "description": "Total test cases evaluated" },
+        "timestamp": { "type": "string", "format": "date-time", "description": "Submission ISO timestamp" }
+      },
+      "required": ["id", "problemId", "userId", "status", "timestamp"]
+    },
+    "QuizAttempt": {
+      "title": "QuizAttempt",
+      "description": "Completed quiz attempt and question-level evaluation record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique attempt identifier" },
+        "quizId": { "type": "string", "description": "Target quiz identifier" },
+        "userId": { "type": "string", "description": "Author user identifier" },
+        "score": { "type": "number", "description": "Score achieved" },
+        "totalQuestions": { "type": "number", "description": "Total questions in quiz" },
+        "percentage": { "type": "number", "description": "Percentage score" },
+        "passed": { "type": "boolean", "description": "Whether passing threshold was reached" },
+        "date": { "type": "string", "format": "date-time", "description": "Attempt ISO timestamp" },
+        "answers": { "type": "array", "description": "Selected question answers" }
+      },
+      "required": ["id", "quizId", "userId", "score", "percentage", "date"]
+    },
+    "MockInterviewSession": {
+      "title": "MockInterviewSession",
+      "description": "Interactive AI-conducted mock interview transcript and evaluation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique session identifier" },
+        "userId": { "type": "string", "description": "Candidate user identifier" },
+        "role": { "type": "string", "description": "Target job role" },
+        "company": { "type": "string", "description": "Target company" },
+        "type": { "type": "string", "description": "Interview domain (coding, system_design, etc.)" },
+        "status": { "type": "string", "enum": ["active", "completed", "abandoned"], "description": "Session status" },
+        "overallScore": { "type": "number", "description": "Overall evaluation score 0-100" },
+        "messages": { "type": "array", "description": "Transcript of conversational turns" },
+        "feedback": { "type": "object", "description": "Structured AI performance review" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Session creation ISO timestamp" }
+      },
+      "required": ["id", "userId", "role", "company", "status", "createdAt"]
+    },
+    "Announcement": {
+      "title": "Announcement",
+      "description": "Platform placement drive and curriculum update broadcast",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique announcement identifier" },
+        "title": { "type": "string", "description": "Announcement headline" },
+        "content": { "type": "string", "description": "Announcement body content" },
+        "tag": { "type": "string", "description": "Category tag" },
+        "date": { "type": "string", "description": "Date string YYYY-MM-DD" },
+        "active": { "type": "boolean", "description": "Whether announcement is visible" }
+      },
+      "required": ["id", "title", "content", "date", "active"]
+    },
+    "RevokedTokenRecord": {
+      "title": "RevokedTokenRecord",
+      "description": "Cryptographically revoked JWT identifier record",
+      "type": "object",
+      "properties": {
+        "jti": { "type": "string", "description": "Unique JWT ID" },
+        "expiresAt": { "type": "number", "description": "Epoch millisecond expiration time" },
+        "revokedAt": { "type": "string", "format": "date-time", "description": "Revocation timestamp" },
+        "userId": { "type": "string", "description": "User identifier who revoked session" }
+      },
+      "required": ["jti", "expiresAt", "revokedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles, credentials, stats, and learning roadmaps"
+    },
+    "/courses/{courseId}": {
+      "schema": "Course",
+      "description": "Curriculum course content catalog"
+    },
+    "/problems/{problemId}": {
+      "schema": "CodingProblem",
+      "description": "Algorithmic coding problem bank"
+    },
+    "/companies/{companyId}": {
+      "schema": "CompanyPrep",
+      "description": "Placement preparation syllabi and company company profiles"
+    },
+    "/submissions/{submissionId}": {
+      "schema": "ProblemSubmission",
+      "description": "User coding submissions and testcase evaluations"
+    },
+    "/quizAttempts/{quizAttemptId}": {
+      "schema": "QuizAttempt",
+      "description": "User quiz attempt scores and evaluations"
+    },
+    "/mockInterviews/{interviewId}": {
+      "schema": "MockInterviewSession",
+      "description": "User AI mock interview transcripts and feedback"
+    },
+    "/announcements/{announcementId}": {
+      "schema": "Announcement",
+      "description": "Platform-wide announcements and drive notices"
+    },
+    "/revokedTokens/{jti}": {
+      "schema": "RevokedTokenRecord",
+      "description": "Revoked JWT identifiers for cross-instance session invalidation"
+    }
+  }
+}

@@ -26,7 +26,7 @@ const OVERSCAN = 6;
 
 export const ProblemList: React.FC = () => {
   const { user } = useAuth();
-  const { navigateToProblem, setTutorContext } = useApp();
+  const { navigateToProblem } = useApp();
   const [problems, setProblems] = useState<CodingProblemSummary[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -41,17 +41,6 @@ export const ProblemList: React.FC = () => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(640);
-
-  // Synchronize AI Tutor context with current active filters
-  useEffect(() => {
-    setTutorContext({
-      topic: selectedCategory !== "All" ? selectedCategory : "Data Structures & Algorithms",
-      difficulty: selectedDifficulty !== "All" ? selectedDifficulty : "All Levels",
-      company: selectedCompany !== "All" ? selectedCompany : undefined,
-      courseTitle: "Algorithmic Problem Bank",
-      lessonTitle: selectedCompany !== "All" ? `${selectedCompany} DSA Questions` : (selectedCategory !== "All" ? `${selectedCategory} Problems` : "DSA Problem Catalog"),
-    });
-  }, [selectedCategory, selectedDifficulty, selectedCompany, setTutorContext]);
 
   const fetchProblemMetadata = useCallback(() => {
     setLoading(true);

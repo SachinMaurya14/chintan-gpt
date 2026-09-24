@@ -4,7 +4,7 @@ import {
   PlaygroundExecutionResponse,
   DiagnosticItem,
 } from "../types.js";
-import { PlaygroundSandbox } from "../sandbox.js";
+import { IsolatedExecutionClient } from "../sandbox.js";
 import path from "path";
 
 export class CppAdapter extends BaseLanguageAdapter {
@@ -16,21 +16,11 @@ export class CppAdapter extends BaseLanguageAdapter {
     version?: string;
     details?: string;
   }> {
-    const hasGpp = await PlaygroundSandbox.isBinaryAvailable("g++");
-    if (hasGpp) {
-      const version = await PlaygroundSandbox.getBinaryVersion("g++");
-      return { available: true, version, details: "GCC C++ Compiler" };
-    }
-
-    const hasClang = await PlaygroundSandbox.isBinaryAvailable("clang++");
-    if (hasClang) {
-      const version = await PlaygroundSandbox.getBinaryVersion("clang++");
-      return { available: true, version, details: "Clang++ Compiler" };
-    }
-
+    const health = await IsolatedExecutionClient.checkServiceHealth();
     return {
-      available: false,
-      details: "Neither g++ nor clang++ was found on system PATH.",
+      available: health.available,
+      version: health.version || "GCC 14.1.0 C++ (Isolated Container)",
+      details: health.details,
     };
   }
 
@@ -38,120 +28,66 @@ export class CppAdapter extends BaseLanguageAdapter {
     request: PlaygroundExecutionRequest,
     options: { timeoutMs: number; maxOutputBytes: number }
   ): Promise<PlaygroundExecutionResponse> {
-    const runtimeCheck = await this.isRuntimeAvailable();
-    if (!runtimeCheck.available) {
-      return this.createUnavailableResponse(
-        "C++ (g++)",
-        "System requires g++ or clang++ installed on the container host."
-      );
+    const validation = IsolatedExecutionClient.validatePayload(request.files, request.stdin);
+    if (!validation.valid) {
+      return this.createResponse("error", "", validation.error || "Invalid payload.", -1, 0);
     }
 
-    const { dir, id } = await PlaygroundSandbox.createTempWorkspace("cpp");
-
-    try {
-      // 1. Write workspace files
-      const written = await PlaygroundSandbox.writeProjectFiles(dir, request.files);
-      const cppFiles = written.filter((f) => f.endsWith(".cpp") || f.endsWith(".cc") || f.endsWith(".c"));
-
-      if (cppFiles.length === 0) {
-        return this.createResponse(
-          "error",
-          "",
-          "No C++ source files (.cpp, .cc) found in project workspace.",
-          -1,
-          0
-        );
-      }
-
-      // 2. Compilation phase
-      const compilerBin = (await PlaygroundSandbox.isBinaryAvailable("g++")) ? "g++" : "clang++";
-      const compileArgs = [
-        "-std=c++20",
-        "-O2",
-        "-Wall",
-        ...cppFiles,
-        "-o",
-        "main_exec",
-      ];
-
-      const compileResult = await PlaygroundSandbox.executeCommand(compilerBin, compileArgs, {
-        cwd: dir,
-        timeoutMs: 10000,
-        maxOutputBytes: options.maxOutputBytes,
-      });
-
-      // Parse diagnostics from compiler output
-      const sanitizedCompileErr = PlaygroundSandbox.sanitizeOutput(compileResult.stderr, dir);
-      const diagnostics = this.parseCompilerDiagnostics(sanitizedCompileErr);
-
-      if (compileResult.exitCode !== 0 || compileResult.timedOut) {
-        return this.createResponse(
-          "compile_error",
-          "",
-          sanitizedCompileErr || "Compilation failed with errors.",
-          compileResult.exitCode,
-          compileResult.durationMs,
-          diagnostics,
-          compileResult.timedOut ? "Compilation timed out." : undefined,
-          {
-            metadata: {
-              language: "C++",
-              version: runtimeCheck.version,
-              timestamp: new Date().toISOString(),
-            },
-          }
-        );
-      }
-
-      // 3. Execution phase
-      const runResult = await PlaygroundSandbox.executeCommand("./main_exec", [], {
-        cwd: dir,
-        stdin: request.stdin,
-        timeoutMs: options.timeoutMs,
-        maxOutputBytes: options.maxOutputBytes,
-      });
-
-      const sanitizedStdout = PlaygroundSandbox.sanitizeOutput(runResult.stdout, dir);
-      let sanitizedStderr = PlaygroundSandbox.sanitizeOutput(runResult.stderr, dir);
-
-      let status: PlaygroundExecutionResponse["status"] = "success";
-      let systemMessage: string | undefined;
-
-      if (runResult.timedOut) {
-        status = "timeout";
-        systemMessage = `Execution timed out after ${options.timeoutMs}ms (infinite loop or blocked I/O).`;
-      } else if (runResult.signal) {
-        status = "runtime_error";
-        sanitizedStderr += `\nProcess terminated with signal: ${runResult.signal} (e.g. Segmentation fault or floating-point error).`;
-      } else if (runResult.exitCode !== 0) {
-        status = "runtime_error";
-      }
-
+    const cppFiles = request.files.filter((f) => f.name.endsWith(".cpp") || f.name.endsWith(".cc") || f.name.endsWith(".c"));
+    if (cppFiles.length === 0) {
       return this.createResponse(
-        status,
-        sanitizedStdout,
-        sanitizedStderr,
-        runResult.exitCode,
-        runResult.durationMs,
-        diagnostics,
-        systemMessage,
-        {
-          metadata: {
-            language: "C++",
-            version: runtimeCheck.version,
-            timestamp: new Date().toISOString(),
-          },
-        }
+        "error",
+        "",
+        "No C++ source files (.cpp, .cc) found in project workspace.",
+        -1,
+        0
       );
-    } finally {
-      await PlaygroundSandbox.cleanup(dir);
     }
+
+    const sourceCode = IsolatedExecutionClient.bundleFiles("cpp", request.files, request.activeFileName);
+
+    const runResult = await IsolatedExecutionClient.execute({
+      language: "cpp",
+      sourceCode,
+      stdin: request.stdin,
+      timeoutMs: options.timeoutMs,
+    });
+
+    const sanitizedStdout = IsolatedExecutionClient.sanitizeOutput(runResult.stdout, options.maxOutputBytes);
+    const sanitizedStderr = IsolatedExecutionClient.sanitizeOutput(runResult.stderr, options.maxOutputBytes);
+    const diagnostics = this.parseCompilerDiagnostics(sanitizedStderr);
+
+    let status: PlaygroundExecutionResponse["status"] = "success";
+    let systemMessage: string | undefined;
+
+    if (runResult.timedOut) {
+      status = "timeout";
+      systemMessage = `Execution timed out after ${options.timeoutMs}ms (infinite loop or unhandled input prompt).`;
+    } else if (runResult.statusDescription === "Service Unavailable" || runResult.error) {
+      status = "runtime_unavailable";
+      systemMessage = "Secure execution service is currently unavailable. Untrusted host execution is disabled for security.";
+    } else if (runResult.exitCode !== 0) {
+      status = (sanitizedStderr.includes("error:") || !!runResult.compileOutput) ? "compile_error" : "runtime_error";
+    }
+
+    return this.createResponse(
+      status,
+      sanitizedStdout,
+      sanitizedStderr,
+      runResult.exitCode,
+      runResult.durationMs,
+      diagnostics,
+      systemMessage,
+      {
+        metadata: {
+          language: "C++",
+          version: "GCC 14.1.0 C++ (Isolated Container)",
+          timestamp: new Date().toISOString(),
+        },
+      }
+    );
   }
 
-  /**
-   * Parses GCC/Clang standard compiler diagnostic messages
-   * Example: main.cpp:8:15: error: expected ';' before 'return'
-   */
   private parseCompilerDiagnostics(errorText: string): DiagnosticItem[] {
     const items: DiagnosticItem[] = [];
     if (!errorText) return items;

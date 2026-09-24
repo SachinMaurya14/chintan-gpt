@@ -28,7 +28,7 @@ import confetti from "canvas-confetti";
 
 export const CodeWorkspace: React.FC<{ problemId: string }> = ({ problemId }) => {
   const { user, refreshProfile } = useAuth();
-  const { setSelectedProblemId, setIsTutorOpen, setTutorContext } = useApp();
+  const { setSelectedProblemId, navigateToTutor } = useApp();
 
   const cached = api.getCachedProblem(problemId);
   const [problem, setProblem] = useState<CodingProblem | null>(cached || null);
@@ -66,18 +66,6 @@ export const CodeWorkspace: React.FC<{ problemId: string }> = ({ problemId }) =>
       setLanguage(defaultLang);
       const initialCode = p?.starterCode?.[defaultLang] || "";
       setCode(initialCode);
-      if (p) {
-        setTutorContext({
-          problemTitle: p.title,
-          problemStatement: p.description,
-          topic: p.topics?.[0] || p.category || "Data Structures & Algorithms",
-          difficulty: p.difficulty,
-          company: (p.companyTags && p.companyTags.length > 0) ? p.companyTags.join(", ") : undefined,
-          courseTitle: "Algorithmic Problem Bank",
-          lessonTitle: p.title,
-          contextCode: initialCode,
-        });
-      }
     });
     
     api.getSubmissions(problemId).then((s) => {
@@ -87,27 +75,24 @@ export const CodeWorkspace: React.FC<{ problemId: string }> = ({ problemId }) =>
     return () => {
       isMounted = false;
     };
-  }, [problemId, setTutorContext]);
+  }, [problemId]);
 
   const handleLanguageChange = (newLang: SupportedLanguage) => {
     setLanguage(newLang);
     if (problem?.starterCode?.[newLang]) {
       const newCode = problem.starterCode[newLang];
       setCode(newCode);
-      setTutorContext((prev) => ({ ...prev, contextCode: newCode }));
     }
   };
 
   const handleCodeChange = (newCode: string) => {
     setCode(newCode);
-    setTutorContext((prev) => ({ ...prev, contextCode: newCode }));
   };
 
   const handleResetCode = () => {
     if (problem?.starterCode?.[language]) {
       const defaultCode = problem.starterCode[language];
       setCode(defaultCode);
-      setTutorContext((prev) => ({ ...prev, contextCode: defaultCode }));
     }
   };
 
@@ -446,6 +431,14 @@ export const CodeWorkspace: React.FC<{ problemId: string }> = ({ problemId }) =>
                     {aiFeedback}
                   </div>
                 )}
+                <button
+                  type="button"
+                  onClick={() => navigateToTutor()}
+                  className="mt-2 w-full py-1.5 rounded-lg bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 border border-orange-500/30 text-xs font-mono font-bold flex items-center justify-center gap-1.5 transition"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Discuss in AI Tutor &rarr;</span>
+                </button>
               </div>
             )}
           </div>

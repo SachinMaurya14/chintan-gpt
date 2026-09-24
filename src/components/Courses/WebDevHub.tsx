@@ -26,7 +26,7 @@ interface WebDevHubProps {
 
 export const WebDevHub: React.FC<WebDevHubProps> = ({ onBack }) => {
   const { user } = useAuth();
-  const { navigateToCourse } = useApp();
+  const { navigateToCourse, getCourseProgress, isCourseCompleted, getCourseProgressDetails } = useApp();
   const [courses, setCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -125,7 +125,7 @@ export const WebDevHub: React.FC<WebDevHubProps> = ({ onBack }) => {
             </div>
             <div className="flex items-center gap-1.5 bg-black/40 px-3 py-1.5 rounded-lg border border-zinc-800">
               <span className="w-2 h-2 rounded-full bg-cyan-500" />
-              <span>Chintan AI Tutor Integrated</span>
+              <span>Full-Stack Coding Sandboxes</span>
             </div>
           </div>
         </div>
@@ -145,21 +145,10 @@ export const WebDevHub: React.FC<WebDevHubProps> = ({ onBack }) => {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {sortedCourses.map((course, index) => {
-            let totalLessons = 0;
-            let completedInCourse = 0;
-            const completedLessonIds = user?.completedLessonIds || [];
-
-            (course.modules || []).forEach((mod) => {
-              (mod.lessons || []).forEach((les) => {
-                totalLessons++;
-                if (completedLessonIds.includes(les.id)) {
-                  completedInCourse++;
-                }
-              });
-            });
-
-            const progressPercent = totalLessons > 0 ? Math.round((completedInCourse / totalLessons) * 100) : 0;
+            const progressPercent = getCourseProgress(course.id);
+            const isCompleted = isCourseCompleted(course.id);
             const isStarted = progressPercent > 0;
+            const details = getCourseProgressDetails(course.id);
 
             return (
               <div
@@ -180,6 +169,17 @@ export const WebDevHub: React.FC<WebDevHubProps> = ({ onBack }) => {
                       {getTrackIcon(course.id)}
                       <span>Track {index + 1}</span>
                     </div>
+
+                    {isCompleted ? (
+                      <div className="absolute top-3 right-3 px-2.5 py-0.5 rounded-full bg-emerald-500/90 text-white text-[10px] font-mono font-black uppercase tracking-wider shadow flex items-center gap-1 backdrop-blur-sm">
+                        <CheckCircle2 className="w-3 h-3 text-white" />
+                        <span>Completed</span>
+                      </div>
+                    ) : isStarted ? (
+                      <div className="absolute top-3 right-3 px-2 py-0.5 rounded-full bg-orange-500/90 text-white text-[10px] font-mono font-bold uppercase tracking-wider shadow backdrop-blur-sm">
+                        {progressPercent}% Done
+                      </div>
+                    ) : null}
 
                     <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between text-[11px] font-mono text-zinc-300">
                       <span className="bg-black/70 px-2 py-0.5 rounded border border-zinc-800/80">{course.level}</span>
@@ -238,21 +238,37 @@ export const WebDevHub: React.FC<WebDevHubProps> = ({ onBack }) => {
                 {/* Card Footer & Action */}
                 <div className="p-5 pt-3 border-t border-zinc-800/80 bg-[#0e0e12] space-y-3">
                   <div className="flex items-center justify-between text-xs font-mono">
-                    <span className="text-zinc-500">Course Progress</span>
-                    <span className="font-bold text-orange-400">{progressPercent}%</span>
+                    <span className="text-zinc-500">
+                      {details.completedCount > 0 ? `${details.completedCount}/${details.totalLessons} Lessons` : "Course Progress"}
+                    </span>
+                    <span className={`font-bold ${isCompleted ? "text-emerald-400" : "text-orange-400"}`}>
+                      {progressPercent}%
+                    </span>
                   </div>
                   <div className="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden">
                     <div
-                      className="bg-orange-500 h-1.5 rounded-full transition-all duration-500"
+                      className={`h-1.5 rounded-full transition-all duration-500 ${
+                        isCompleted ? "bg-emerald-500" : "bg-orange-500"
+                      }`}
                       style={{ width: `${progressPercent}%` }}
                     />
                   </div>
 
                   <button
                     onClick={() => navigateToCourse(course.id)}
-                    className="w-full py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 active:scale-[0.99] text-white font-mono font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-md shadow-orange-500/10"
+                    className={`w-full py-2.5 rounded-xl font-mono font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-md ${
+                      isCompleted
+                        ? "bg-emerald-950/40 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-600 hover:text-white"
+                        : "bg-orange-500 hover:bg-orange-600 active:scale-[0.99] text-white shadow-orange-500/10"
+                    }`}
                   >
-                    <span>{isStarted ? "CONTINUE COURSE" : "START COURSE"}</span>
+                    <span>
+                      {isCompleted
+                        ? "COMPLETED • REVIEW"
+                        : isStarted
+                        ? "CONTINUE COURSE"
+                        : "START COURSE"}
+                    </span>
                     <ArrowRight className="w-4 h-4" />
                   </button>
                 </div>

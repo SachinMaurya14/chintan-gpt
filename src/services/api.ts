@@ -12,7 +12,6 @@ import {
   CodeExecutionResult,
   SupportedLanguage,
   AuthResponse,
-  TutorResponsePayload,
   VisualDiagramResponse,
   SearchGroundingResponse,
   PlaylistVideoItem
@@ -26,16 +25,27 @@ import playlistDataRaw from "../../server/data/playlistData.json";
 const playlistMap: Record<string, PlaylistVideoItem[]> = playlistDataRaw as any;
 
 function getApiBaseUrl(): string {
-  const metaEnv = typeof import.meta !== "undefined" ? (import.meta as any).env : undefined;
-  const rawUrl = (
-    metaEnv?.VITE_API_BASE_URL ||
-    metaEnv?.VITE_APP_URL ||
-    ""
-  ).trim();
+  if (typeof window !== "undefined") {
+    const metaEnv = typeof import.meta !== "undefined" ? (import.meta as any).env : undefined;
+    const rawUrl = (metaEnv?.VITE_API_BASE_URL || "").trim();
 
-  if (rawUrl && (rawUrl.startsWith("http://") || rawUrl.startsWith("https://"))) {
-    const clean = rawUrl.replace(/\/+$/, "");
-    return clean.endsWith("/api") ? clean : `${clean}/api`;
+    // If an external URL is provided, only use it if the browser is actually running on that same origin
+    // or if it's explicitly a relative path like "/api"
+    if (rawUrl && (rawUrl.startsWith("http://") || rawUrl.startsWith("https://"))) {
+      try {
+        const parsed = new URL(rawUrl);
+        // If current window is on a different domain than the rawUrl (e.g. AI Studio preview vs old Vercel URL),
+        // fallback to relative "/api" to communicate with the local host container.
+        if (parsed.hostname !== window.location.hostname && !window.location.hostname.includes(parsed.hostname)) {
+          return "/api";
+        }
+        const clean = rawUrl.replace(/\/+$/, "");
+        return clean.endsWith("/api") ? clean : `${clean}/api`;
+      } catch {
+        return "/api";
+      }
+    }
+    return "/api";
   }
 
   return "/api";
@@ -49,7 +59,7 @@ function getAuthToken(): string | null {
   }
 }
 
-async function request<T>(endpoint: string, options?: RequestInit, retries: number = 1): Promise<T> {
+async function request<T>(endpoint: string, options?: RequestInit, retries: number = 2): Promise<T> {
   const token = getAuthToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -65,7 +75,7 @@ async function request<T>(endpoint: string, options?: RequestInit, retries: numb
   const fullUrl = `${baseUrl}${cleanEndpoint}`;
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 4000);
+  const timeoutId = setTimeout(() => controller.abort(), 45000);
 
   try {
     const res = await fetch(fullUrl, {
@@ -99,11 +109,23 @@ async function request<T>(endpoint: string, options?: RequestInit, retries: numb
     return (await res.text()) as unknown as T;
   } catch (err: any) {
     clearTimeout(timeoutId);
-    const isGet = !options?.method || options.method.toUpperCase() === "GET";
-    if (isGet && retries > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 200));
+
+    const isNetworkError =
+      err?.name === "TypeError" ||
+      err?.name === "AbortError" ||
+      err?.message?.includes("Failed to fetch") ||
+      err?.message?.includes("network") ||
+      err?.message?.includes("aborted");
+
+    if (retries > 0 && isNetworkError) {
+      await new Promise((resolve) => setTimeout(resolve, 600));
       return request<T>(endpoint, options, retries - 1);
     }
+
+    if (err?.name === "AbortError" || err?.message?.includes("aborted")) {
+      throw new Error("Request timed out. The AI model took longer than expected to respond.");
+    }
+
     throw err;
   }
 }
@@ -215,199 +237,75 @@ export const api = {
     }
   },
 
-  // Authentication & Session (fully client-compatible)
-  register: async (data: { name: string; email: string; password: string; role?: "student" | "admin" }) => {
-    try {
-      return await request<AuthResponse>("/auth/register", {
-        method: "POST",
-        body: JSON.stringify(data),
-      });
-    } catch {
-      return {
-        success: true,
-        token: "local_auth_token",
-        user: {
-          id: "usr_student_main",
-          name: data.name,
-          email: data.email,
-          role: data.role || "student",
-          avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=chintan_student_1",
-          createdAt: new Date().toISOString(),
-          lastActive: new Date().toISOString(),
-          streak: 1,
-          longestStreak: 1,
-          xp: 100,
-          level: 1,
-          solvedProblemIds: [],
-          problemsAttempted: 0,
-          completedLessonIds: [],
-          enrolledCourseIds: ["course_fullstack_webdev"],
-          targetCompanies: ["comp_google", "comp_tcs"],
-          quizzesCompleted: 0,
-          learningMinutes: 10,
-          weakTopics: [],
-          streakHistory: [{ date: new Date().toISOString().split("T")[0], count: 1 }],
-        },
-      } as AuthResponse;
+  // Authentication & Session (Strict real backend authentication)
+  register: async (data: { name: string; email: string; password: string; role?: "student" | "admin" }): Promise<AuthResponse> => {
+    const res = await request<AuthResponse>("/auth/register", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    if (res && res.token) {
+      try {
+        localStorage.setItem("chintan_auth_token", res.token);
+      } catch {}
     }
+    return res;
   },
-  login: async (data: { email: string; password: string }) => {
-    try {
-      return await request<AuthResponse>("/auth/login", {
-        method: "POST",
-        body: JSON.stringify(data),
-      });
-    } catch {
-      return {
-        success: true,
-        token: "local_auth_token",
-        user: {
-          id: "usr_student_main",
-          name: data.email.split("@")[0] || "Student Scholar",
-          email: data.email,
-          role: "student",
-          avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=chintan_student_1",
-          createdAt: new Date().toISOString(),
-          lastActive: new Date().toISOString(),
-          streak: 3,
-          longestStreak: 5,
-          xp: 350,
-          level: 2,
-          solvedProblemIds: ["prob_two_sum", "prob_valid_anagram"],
-          problemsAttempted: 3,
-          completedLessonIds: ["les_web_1_1"],
-          enrolledCourseIds: ["course_fullstack_webdev"],
-          targetCompanies: ["comp_google", "comp_tcs"],
-          quizzesCompleted: 2,
-          learningMinutes: 75,
-          weakTopics: [],
-          streakHistory: [{ date: new Date().toISOString().split("T")[0], count: 1 }],
-        },
-      } as AuthResponse;
+  login: async (data: { email: string; password: string }): Promise<AuthResponse> => {
+    const res = await request<AuthResponse>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    if (res && res.token) {
+      try {
+        localStorage.setItem("chintan_auth_token", res.token);
+      } catch {}
     }
+    return res;
   },
-  logout: async () => {
+  logout: async (): Promise<{ success: boolean; message: string }> => {
     try {
-      return await request<{ success: boolean; message: string }>("/auth/logout", {
+      const res = await request<{ success: boolean; message: string }>("/auth/logout", {
         method: "POST",
       });
-    } catch {
-      return { success: true, message: "Logged out locally" };
+      return res;
+    } finally {
+      try {
+        localStorage.removeItem("chintan_auth_token");
+        localStorage.removeItem("chintan_user_profile_v2");
+      } catch {}
     }
   },
-  getMe: async () => {
-    try {
-      return await request<UserProfile>("/auth/me");
-    } catch {
-      return api.getProfile();
-    }
+  getMe: async (): Promise<{ success: boolean; user: UserProfile }> => {
+    return await request<{ success: boolean; user: UserProfile }>("/auth/me");
   },
   forgotPassword: async (email: string) => {
-    try {
-      return await request<{ success: boolean; message: string }>("/auth/forgot-password", {
-        method: "POST",
-        body: JSON.stringify({ email }),
-      });
-    } catch {
-      return { success: true, message: "Password reset instructions sent (local mode)" };
-    }
+    return await request<{ success: boolean; message: string }>("/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
   },
 
   // User Profile & Preferences
   getProfile: async (): Promise<UserProfile> => {
-    try {
-      return await request<UserProfile>("/user/profile");
-    } catch {
-      try {
-        const saved = localStorage.getItem("chintan_user_profile_v2");
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (parsed && parsed.id) return parsed;
-        }
-      } catch {}
-      return {
-        id: "usr_student_main",
-        name: "Student Scholar",
-        email: "student@chintangpt.com",
-        role: "student",
-        avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=chintan_student_1",
-        createdAt: new Date().toISOString(),
-        lastActive: new Date().toISOString(),
-        streak: 3,
-        longestStreak: 5,
-        xp: 350,
-        level: 2,
-        solvedProblemIds: ["prob_two_sum", "prob_valid_anagram"],
-        problemsAttempted: 3,
-        completedLessonIds: ["les_web_1_1", "les_web_1_2"],
-        completedVideoIds: [],
-        enrolledCourseIds: ["course_fullstack_webdev", "course_dsa_1", "course_system_design_1"],
-        targetCompanies: ["comp_google", "comp_microsoft", "comp_tcs"],
-        quizzesCompleted: 2,
-        learningMinutes: 75,
-        weakTopics: [],
-        streakHistory: [{ date: new Date().toISOString().split("T")[0], count: 1 }],
-      };
-    }
-  },
-  switchRole: async (role: "student" | "admin") => {
-    try {
-      return await request<{ success: boolean; token: string; user: UserProfile }>("/user/switch-role", {
-        method: "POST",
-        body: JSON.stringify({ role }),
-      });
-    } catch {
-      const p = await api.getProfile();
-      p.role = role;
-      return { success: true, token: "local_auth_token", user: p };
-    }
+    return await request<UserProfile>("/user/profile");
   },
   updateProfile: async (data: Partial<UserProfile>) => {
-    try {
-      return await request<UserProfile>("/user/update-profile", {
-        method: "POST",
-        body: JSON.stringify(data),
-      });
-    } catch {
-      const current = await api.getProfile();
-      const updated = { ...current, ...data };
-      try {
-        localStorage.setItem("chintan_user_profile_v2", JSON.stringify(updated));
-      } catch {}
-      return updated;
-    }
+    return await request<{ success: boolean; user: UserProfile }>("/user/update-profile", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
   },
   setTargetCompanies: async (companyIds: string[]) => {
-    try {
-      return await request<{ success: boolean; user: UserProfile }>("/user/target-companies", {
-        method: "POST",
-        body: JSON.stringify({ companyIds }),
-      });
-    } catch {
-      const u = await api.getProfile();
-      u.targetCompanies = companyIds;
-      try {
-        localStorage.setItem("chintan_user_profile_v2", JSON.stringify(u));
-      } catch {}
-      return { success: true, user: u };
-    }
+    return await request<{ success: boolean; user: UserProfile }>("/user/target-companies", {
+      method: "POST",
+      body: JSON.stringify({ companyIds }),
+    });
   },
   enrollCourse: async (courseId: string) => {
-    try {
-      return await request<{ success: boolean; user: UserProfile }>("/user/enroll-course", {
-        method: "POST",
-        body: JSON.stringify({ courseId }),
-      });
-    } catch {
-      const u = await api.getProfile();
-      if (!u.enrolledCourseIds.includes(courseId)) {
-        u.enrolledCourseIds.push(courseId);
-        try {
-          localStorage.setItem("chintan_user_profile_v2", JSON.stringify(u));
-        } catch {}
-      }
-      return { success: true, user: u };
-    }
+    return await request<{ success: boolean; user: UserProfile }>("/user/enroll-course", {
+      method: "POST",
+      body: JSON.stringify({ courseId }),
+    });
   },
 
   // Courses & Lessons & Playlists
@@ -427,6 +325,17 @@ export const api = {
     }
     coursesCache = { data: SEED_COURSES, timestamp: Date.now() };
     return SEED_COURSES;
+  },
+  getCourseProgress: async (): Promise<Record<string, { totalLessons: number; completedCount: number; percentage: number; isCompleted: boolean }>> => {
+    try {
+      const res = await request<{
+        success: boolean;
+        progress: Record<string, { totalLessons: number; completedCount: number; percentage: number; isCompleted: boolean }>;
+      }>("/courses/progress");
+      return res?.progress || {};
+    } catch {
+      return {};
+    }
   },
   getCourse: async (id: string, forceRefresh: boolean = false): Promise<Course> => {
     const now = Date.now();
@@ -472,62 +381,22 @@ export const api = {
     return local;
   },
   completeLesson: async (courseId: string, lessonId: string) => {
-    try {
-      return await request<{ success: boolean; user: UserProfile }>(
-        `/courses/${courseId}/lessons/${lessonId}/complete`,
-        { method: "POST" }
-      );
-    } catch {
-      const u = await api.getProfile();
-      if (!u.completedLessonIds.includes(lessonId)) {
-        u.completedLessonIds.push(lessonId);
-        u.xp += 25;
-        try {
-          localStorage.setItem("chintan_user_profile_v2", JSON.stringify(u));
-        } catch {}
-      }
-      return { success: true, user: u };
-    }
+    return await request<{ success: boolean; user: UserProfile }>(
+      `/courses/${courseId}/lessons/${lessonId}/complete`,
+      { method: "POST" }
+    );
   },
   completeVideo: async (courseId: string, videoId: string, data?: { playlistId?: string; videoTitle?: string }) => {
-    try {
-      return await request<{ success: boolean; user: UserProfile }>(
-        `/courses/${courseId}/videos/${videoId}/complete`,
-        { method: "POST", body: JSON.stringify(data || {}) }
-      );
-    } catch {
-      const u = await api.getProfile();
-      if (!u.completedVideoIds) u.completedVideoIds = [];
-      if (!u.completedVideoIds.includes(videoId)) {
-        u.completedVideoIds.push(videoId);
-        u.xp += 20;
-        try {
-          localStorage.setItem("chintan_user_profile_v2", JSON.stringify(u));
-        } catch {}
-      }
-      return { success: true, user: u };
-    }
+    return await request<{ success: boolean; user: UserProfile }>(
+      `/courses/${courseId}/videos/${videoId}/complete`,
+      { method: "POST", body: JSON.stringify(data || {}) }
+    );
   },
   recordWatchHistory: async (data: { courseId: string; videoId: string; playlistId?: string; videoTitle?: string; completed?: boolean }) => {
-    try {
-      return await request<{ success: boolean; user: UserProfile }>("/user/watch-history", {
-        method: "POST",
-        body: JSON.stringify(data),
-      });
-    } catch {
-      const u = await api.getProfile();
-      if (!u.lastWatchedVideos) u.lastWatchedVideos = {};
-      u.lastWatchedVideos[data.courseId] = {
-        videoId: data.videoId,
-        playlistId: data.playlistId,
-        videoTitle: data.videoTitle,
-        lastWatchedAt: new Date().toISOString()
-      };
-      try {
-        localStorage.setItem("chintan_user_profile_v2", JSON.stringify(u));
-      } catch {}
-      return { success: true, user: u };
-    }
+    return await request<{ success: boolean; user: UserProfile }>("/user/watch-history", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
   },
 
   // Coding Problems & Execution
@@ -687,39 +556,6 @@ export const api = {
     } catch {
       const local = getStoredSubmissions();
       return problemId ? local.filter((s) => s.problemId === problemId) : local;
-    }
-  },
-
-  // Chintan AI Tutor
-  askTutor: async (params: {
-    problemTitle?: string;
-    problemStatement?: string;
-    topic?: string;
-    difficulty?: string;
-    company?: string;
-    courseTitle?: string;
-    moduleTitle?: string;
-    lessonTitle?: string;
-    userQuestion: string;
-    actionType?: string;
-    contextCode?: string;
-    recentMistakes?: string;
-    conversationHistory?: { sender: "ai" | "user"; text: string }[];
-    requestVisual?: boolean;
-  }): Promise<TutorResponsePayload> => {
-    try {
-      return await request<TutorResponsePayload>("/ai/tutor", {
-        method: "POST",
-        body: JSON.stringify(params),
-      });
-    } catch {
-      return {
-        answer: `### Concept Guidance: ${params.userQuestion || params.problemTitle || "Algorithmic Analysis"}\n\nHere is the step-by-step breakdown for **${params.problemTitle || params.topic || "this concept"}**:\n\n1. **Core Intuition**: Analyze constraints and choose the appropriate data structure (hash map, two-pointer, or prefix sum).\n2. **Optimal Approach**: Reduce redundant computations to target O(N) or O(N log N) time complexity.\n3. **Edge Cases**: Always test empty inputs, duplicates, and boundary limits.\n\n\`\`\`python\n# Optimal Pattern\ndef solve(data):\n    # Process elements in linear pass\n    seen = set()\n    for item in data:\n        if item in seen:\n            return True\n        seen.add(item)\n    return False\n\`\`\``,
-        isGrounded: true,
-        sources: [
-          { title: "Standard Algorithm Foundations", uri: "https://leetcode.com" }
-        ]
-      };
     }
   },
 
@@ -1086,51 +922,27 @@ export const api = {
   adminDeleteCourse: async (id: string) => {
     coursesCache = null;
     courseDetailsCache.delete(id);
-    try {
-      return await request<{ success: boolean }>(`/admin/courses/${id}`, { method: "DELETE" });
-    } catch {
-      const idx = SEED_COURSES.findIndex((c) => c.id === id);
-      if (idx !== -1) SEED_COURSES.splice(idx, 1);
-      return { success: true };
-    }
+    return await request<{ success: boolean }>(`/admin/courses/${id}`, { method: "DELETE" });
   },
   adminCreateProblem: async (data: CodingProblem) => {
     problemSummariesCache = null;
-    try {
-      return await request<CodingProblem>("/admin/problems", {
-        method: "POST",
-        body: JSON.stringify(data),
-      });
-    } catch {
-      SEED_PROBLEMS.unshift(data);
-      problemMemoryCache.set(data.id, data);
-      return data;
-    }
+    return await request<CodingProblem>("/admin/problems", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
   },
   adminUpdateProblem: async (id: string, data: Partial<CodingProblem>) => {
     problemSummariesCache = null;
     problemMemoryCache.delete(id);
-    try {
-      return await request<CodingProblem>(`/admin/problems/${id}`, {
-        method: "PUT",
-        body: JSON.stringify(data),
-      });
-    } catch {
-      const found = SEED_PROBLEMS.find((p) => p.id === id);
-      if (found) Object.assign(found, data);
-      return (found || data) as CodingProblem;
-    }
+    return await request<CodingProblem>(`/admin/problems/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
   },
   adminDeleteProblem: async (id: string) => {
     problemSummariesCache = null;
     problemMemoryCache.delete(id);
-    try {
-      return await request<{ success: boolean }>(`/admin/problems/${id}`, { method: "DELETE" });
-    } catch {
-      const idx = SEED_PROBLEMS.findIndex((p) => p.id === id);
-      if (idx !== -1) SEED_PROBLEMS.splice(idx, 1);
-      return { success: true };
-    }
+    return await request<{ success: boolean }>(`/admin/problems/${id}`, { method: "DELETE" });
   },
   adminGetUsers: async (): Promise<UserProfile[]> => {
     try {

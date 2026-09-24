@@ -1,227 +1,188 @@
-import { spawn, execFile } from "child_process";
-import fs from "fs";
-import path from "path";
-import os from "os";
-import crypto from "crypto";
 import { PLAYGROUND_CONFIG } from "./config.js";
 import { PlaygroundFilePayload } from "./types.js";
+import { UnifiedExecutionService } from "../execution/executionService.js";
+import { ExecutionValidator } from "../execution/validator.js";
 
-export interface ProcessRunResult {
+export interface IsolatedRunResult {
   stdout: string;
   stderr: string;
   exitCode: number | null;
-  signal: NodeJS.Signals | null;
-  timedOut: boolean;
   durationMs: number;
+  timedOut: boolean;
+  statusDescription: string;
+  memoryKb?: number;
+  compileOutput?: string;
+  error?: string;
 }
 
+/**
+ * IsolatedExecutionClient: Routes untrusted user code through UnifiedExecutionService
+ * to a dedicated, unprivileged remote container execution engine (Judge0, Piston, or self-hosted cluster).
+ * 
+ * STRICT SECURITY BOUNDARY:
+ * - ZERO child_process / spawn / exec / fork on the application host.
+ * - ZERO writing user files to host os.tmpdir().
+ * - ZERO process.env or host secret exposure.
+ * - STRICT fail-closed behavior: If isolated execution is unconfigured or unreachable,
+ *   execution immediately fails safely rather than falling back to host execution.
+ */
+export class IsolatedExecutionClient {
+  public static sanitizeFileName(fileName: string): string {
+    return ExecutionValidator.sanitizeFileName(fileName);
+  }
+
+  public static validatePayload(
+    files: PlaygroundFilePayload[],
+    stdin?: string
+  ): { valid: boolean; error?: string } {
+    return ExecutionValidator.validate({
+      language: "javascript", // placeholder for bounds validation
+      files,
+      stdin
+    });
+  }
+
+  public static sanitizeOutput(output: string, maxBytes = 64 * 1024): string {
+    return ExecutionValidator.sanitizeOutput(output, maxBytes);
+  }
+
+  public static async checkServiceHealth(): Promise<{ available: boolean; details: string; version?: string }> {
+    const health = await UnifiedExecutionService.getHealthStatus();
+    return {
+      available: health.available,
+      details: health.details,
+      version: health.provider ? `Isolated Provider: ${health.provider}` : undefined,
+    };
+  }
+
+  /**
+   * Bundles workspace files for multi-file projects (alias: bundleFiles)
+   */
+  public static bundleFiles(
+    language: string,
+    files: PlaygroundFilePayload[],
+    activeFileName?: string
+  ): string {
+    return this.prepareMultiFilePayload(language, files, activeFileName);
+  }
+
+  public static prepareMultiFilePayload(
+    language: string,
+    files: PlaygroundFilePayload[],
+    activeFileName?: string
+  ): string {
+    if (!files || files.length === 0) return "";
+    const sanitizedFiles = files.map(f => ({
+      name: this.sanitizeFileName(f.name),
+      content: f.content,
+    }));
+
+    let entry = activeFileName
+      ? sanitizedFiles.find(f => f.name === this.sanitizeFileName(activeFileName))
+      : undefined;
+
+    const lang = language.toLowerCase();
+    if (!entry) {
+      if (lang.includes("py")) {
+        entry = sanitizedFiles.find(f => f.name === "main.py" || f.name.endsWith(".py")) || sanitizedFiles[0];
+      } else if (lang.includes("js") || lang.includes("node")) {
+        entry = sanitizedFiles.find(f => f.name === "index.js" || f.name === "main.js" || f.name.endsWith(".js")) || sanitizedFiles[0];
+      } else if (lang.includes("ts")) {
+        entry = sanitizedFiles.find(f => f.name === "index.ts" || f.name.endsWith(".ts")) || sanitizedFiles[0];
+      } else if (lang.includes("cpp") || lang.includes("c++")) {
+        entry = sanitizedFiles.find(f => f.name === "main.cpp" || f.name.endsWith(".cpp")) || sanitizedFiles[0];
+      } else if (lang.includes("java")) {
+        entry = sanitizedFiles.find(f => f.name === "Main.java" || f.name.endsWith(".java")) || sanitizedFiles[0];
+      } else if (lang.includes("kt")) {
+        entry = sanitizedFiles.find(f => f.name === "Main.kt" || f.name.endsWith(".kt")) || sanitizedFiles[0];
+      } else {
+        entry = sanitizedFiles[0];
+      }
+    }
+
+    if (lang.includes("py")) {
+      const helperFiles = sanitizedFiles.filter(f => f !== entry && f.name.endsWith(".py"));
+      if (helperFiles.length > 0) {
+        const helpersCode = helperFiles.map(h => `# --- ${h.name} ---\n${h.content}`).join("\n\n");
+        return `${helpersCode}\n\n# --- Entry: ${entry.name} ---\n${entry.content}`;
+      }
+    }
+
+    return entry.content;
+  }
+
+  /**
+   * Executes source code inside an isolated, unprivileged remote container
+   */
+  public static async execute(params: {
+    language: string;
+    sourceCode: string;
+    files?: PlaygroundFilePayload[];
+    stdin?: string;
+    timeoutMs?: number;
+  }): Promise<IsolatedRunResult> {
+    const result = await UnifiedExecutionService.execute({
+      language: params.language,
+      sourceCode: params.sourceCode,
+      files: params.files,
+      stdin: params.stdin,
+      timeoutMs: params.timeoutMs,
+    });
+
+    const timedOut = result.status === "timeout";
+    let statusDesc = "Success";
+    if (result.status === "runtime_unavailable") {
+      statusDesc = "Service Unavailable";
+    } else if (timedOut) {
+      statusDesc = "Time Limit Exceeded";
+    } else if (result.status === "compile_error") {
+      statusDesc = "Compilation Error";
+    } else if (result.status === "runtime_error") {
+      statusDesc = "Runtime Error";
+    } else if (result.status === "error") {
+      statusDesc = "Validation / Execution Error";
+    }
+
+    return {
+      stdout: result.stdout,
+      stderr: result.stderr,
+      compileOutput: result.compileOutput,
+      exitCode: result.exitCode,
+      durationMs: result.executionTimeMs,
+      timedOut,
+      statusDescription: statusDesc,
+      memoryKb: result.memoryKb,
+      error: result.error,
+    };
+  }
+}
+
+/**
+ * Backward-compatible PlaygroundSandbox wrapper that delegates directly to UnifiedExecutionService.
+ * Contains ZERO host-level process spawning and ZERO disk writes.
+ */
 export class PlaygroundSandbox {
-  private static baseTempDir = path.join(os.tmpdir(), "playground-sandboxes");
-
-  /**
-   * Generates a safe unique workspace directory
-   */
-  public static async createTempWorkspace(prefix = "run"): Promise<{ dir: string; id: string }> {
-    const runId = `${prefix}-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
-    const workspacePath = path.join(this.baseTempDir, runId);
-    await fs.promises.mkdir(workspacePath, { recursive: true });
-    return { dir: workspacePath, id: runId };
+  public static async executeIsolated(params: {
+    language: string;
+    sourceCode: string;
+    files?: PlaygroundFilePayload[];
+    stdin?: string;
+    timeoutMs?: number;
+  }): Promise<IsolatedRunResult> {
+    return IsolatedExecutionClient.execute(params);
   }
 
-  /**
-   * Safely writes project files into the sandbox directory.
-   * Strictly enforces path containment to prevent directory traversal.
-   */
-  public static async writeProjectFiles(
-    dir: string,
-    files: PlaygroundFilePayload[]
-  ): Promise<string[]> {
-    const writtenFiles: string[] = [];
-
-    for (const file of files) {
-      const sanitizedName = file.name.trim().replace(/^(\.\.[\/\\])+/, "");
-      // Resolve path within sandbox
-      const fullPath = path.resolve(dir, sanitizedName);
-
-      // Verify containment
-      if (!fullPath.startsWith(path.resolve(dir))) {
-        throw new Error(`Security Exception: File path "${file.name}" attempts to escape sandbox.`);
-      }
-
-      // Ensure directory exists for nested paths
-      await fs.promises.mkdir(path.dirname(fullPath), { recursive: true });
-      await fs.promises.writeFile(fullPath, file.content || "", "utf-8");
-      writtenFiles.push(sanitizedName);
-    }
-
-    return writtenFiles;
+  public static sanitizeOutput(output: string, _workspaceDir?: string): string {
+    return IsolatedExecutionClient.sanitizeOutput(output);
   }
 
-  /**
-   * Spawns an isolated child process with strict resource and timeout enforcement
-   */
-  public static async executeCommand(
-    command: string,
-    args: string[],
-    options: {
-      cwd: string;
-      stdin?: string;
-      timeoutMs?: number;
-      maxOutputBytes?: number;
-      env?: Record<string, string>;
-    }
-  ): Promise<ProcessRunResult> {
-    const timeoutMs = options.timeoutMs || PLAYGROUND_CONFIG.DEFAULT_TIMEOUT_MS;
-    const maxOutputBytes = options.maxOutputBytes || PLAYGROUND_CONFIG.MAX_OUTPUT_SIZE_BYTES;
-
-    return new Promise<ProcessRunResult>((resolve) => {
-      const startTime = performance.now();
-      let stdoutData = "";
-      let stderrData = "";
-      let isTimedOut = false;
-      let isTerminated = false;
-
-      // Restrict environment variables: do NOT pass sensitive server secrets to child process
-      const safeEnv: NodeJS.ProcessEnv = {
-        PATH: process.env.PATH || "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-        LANG: "en_US.UTF-8",
-        LC_ALL: "en_US.UTF-8",
-        PYTHONUNBUFFERED: "1",
-        ...(options.env || {}),
-      };
-
-      const child = spawn(command, args, {
-        cwd: options.cwd,
-        env: safeEnv,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-
-      // Timeout watchdog
-      const timer = setTimeout(() => {
-        isTimedOut = true;
-        isTerminated = true;
-        try {
-          child.kill("SIGKILL");
-        } catch {
-          // Process may have already exited
-        }
-      }, timeoutMs);
-
-      // Handle stdin if provided
-      if (child.stdin) {
-        if (options.stdin !== undefined && options.stdin !== null) {
-          child.stdin.write(options.stdin);
-        }
-        child.stdin.end();
-      }
-
-      // Stream stdout with byte cap
-      if (child.stdout) {
-        child.stdout.on("data", (chunk: Buffer) => {
-          if (stdoutData.length < maxOutputBytes) {
-            stdoutData += chunk.toString("utf-8");
-            if (stdoutData.length >= maxOutputBytes) {
-              stdoutData += `\n[Output truncated: Exceeded ${Math.round(maxOutputBytes / 1024)} KB limit]`;
-            }
-          }
-        });
-      }
-
-      // Stream stderr with byte cap
-      if (child.stderr) {
-        child.stderr.on("data", (chunk: Buffer) => {
-          if (stderrData.length < maxOutputBytes) {
-            stderrData += chunk.toString("utf-8");
-            if (stderrData.length >= maxOutputBytes) {
-              stderrData += `\n[Error output truncated: Exceeded ${Math.round(maxOutputBytes / 1024)} KB limit]`;
-            }
-          }
-        });
-      }
-
-      // Handle spawn error (e.g. executable not found)
-      child.on("error", (err: Error) => {
-        clearTimeout(timer);
-        const durationMs = Math.round(performance.now() - startTime);
-        resolve({
-          stdout: stdoutData,
-          stderr: `Process spawn error: ${err.message}`,
-          exitCode: -1,
-          signal: null,
-          timedOut: false,
-          durationMs,
-        });
-      });
-
-      // Handle process exit
-      child.on("close", (code: number | null, signal: NodeJS.Signals | null) => {
-        clearTimeout(timer);
-        const durationMs = Math.round(performance.now() - startTime);
-        resolve({
-          stdout: stdoutData,
-          stderr: stderrData,
-          exitCode: code,
-          signal: isTimedOut ? "SIGKILL" : signal,
-          timedOut: isTimedOut,
-          durationMs,
-        });
-      });
-    });
+  public static async isBinaryAvailable(_binName: string): Promise<boolean> {
+    const health = await IsolatedExecutionClient.checkServiceHealth();
+    return health.available;
   }
 
-  /**
-   * Safely cleans up the temporary workspace
-   */
-  public static async cleanup(workspaceDir: string): Promise<void> {
-    try {
-      if (workspaceDir && workspaceDir.includes("playground-sandboxes")) {
-        await fs.promises.rm(workspaceDir, { recursive: true, force: true });
-      }
-    } catch (err) {
-      console.warn(`[PlaygroundSandbox] Failed to clean up workspace ${workspaceDir}:`, err);
-    }
-  }
-
-  /**
-   * Sanitizes output to remove absolute server directory paths
-   */
-  public static sanitizeOutput(output: string, workspaceDir: string): string {
-    if (!output || !workspaceDir) return output;
-    // Replace workspace directory path with relative paths
-    const escaped = workspaceDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const regex = new RegExp(escaped + "[/\\\\]?", "g");
-    return output.replace(regex, "");
-  }
-
-  /**
-   * Checks if a binary is available on the system PATH
-   */
-  public static async isBinaryAvailable(binName: string): Promise<boolean> {
-    return new Promise<boolean>((resolve) => {
-      execFile("which", [binName], (err, stdout) => {
-        if (err || !stdout.trim()) {
-          resolve(false);
-        } else {
-          resolve(true);
-        }
-      });
-    });
-  }
-
-  /**
-   * Gets version string of a binary
-   */
-  public static async getBinaryVersion(binName: string, versionFlag = "--version"): Promise<string | undefined> {
-    return new Promise<string | undefined>((resolve) => {
-      execFile(binName, [versionFlag], { timeout: 3000 }, (err, stdout, stderr) => {
-        if (err && !stdout && !stderr) {
-          resolve(undefined);
-        } else {
-          const out = (stdout || stderr || "").trim();
-          const firstLine = out.split("\n")[0]?.trim();
-          resolve(firstLine || undefined);
-        }
-      });
-    });
+  public static async getBinaryVersion(_binName: string): Promise<string | undefined> {
+    const health = await IsolatedExecutionClient.checkServiceHealth();
+    return health.version || "Isolated Container Sandbox";
   }
 }

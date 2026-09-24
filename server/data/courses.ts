@@ -16,11 +16,11 @@ function createLessonsFromPlaylist(courseId: string, playlistId: string, topicNa
     topic: topicName,
     difficulty: idx < 3 ? "Beginner" : idx < 10 ? "Intermediate" : "Advanced",
     order: v.position,
-    notesMarkdown: `### ${v.title}\n\n- **Course Track**: ${topicName}\n- **Playlist Video**: #${v.position}\n- **YouTube Video ID**: \`${v.videoId}\`\n\nTake notes while watching the video, practice with AI Tutor doubts, and test your understanding with dynamic quizzes.`,
+    notesMarkdown: `### ${v.title}\n\n- **Course Track**: ${topicName}\n- **Playlist Video**: #${v.position}\n- **YouTube Video ID**: \`${v.videoId}\`\n\nTake notes while watching the video, practice problem exercises, and test your understanding with dynamic quizzes.`,
     keyTakeaways: [
       `Master core concepts explained in "${v.title}"`,
       "Apply code examples locally or in sandbox",
-      "Ask Chintan AI Tutor for concept clarifications and edge cases"
+      "Solve practical DSA exercises related to this topic"
     ]
   }));
 }

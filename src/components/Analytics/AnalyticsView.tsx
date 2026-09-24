@@ -20,9 +20,11 @@ import {
   MockInterviewSession
 } from "../../types/index.js";
 import { useAuth } from "../../context/AuthContext.js";
+import { useApp } from "../../context/AppContext.js";
 
 export const AnalyticsView: React.FC = () => {
   const { user } = useAuth();
+  const { setCurrentTab } = useApp();
   const [analytics, setAnalytics] = useState<PlatformAnalytics | null>(null);
   const [submissions, setSubmissions] = useState<ProblemSubmission[]>([]);
   const [problems, setProblems] = useState<CodingProblemSummary[]>([]);
@@ -30,6 +32,26 @@ export const AnalyticsView: React.FC = () => {
   const [quizAttempts, setQuizAttempts] = useState<QuizAttempt[]>([]);
   const [mockInterviews, setMockInterviews] = useState<MockInterviewSession[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Authenticated user isolation
+  const effectiveUser = useMemo(() => {
+    return (
+      user || {
+        id: "guest",
+        name: "Guest Student",
+        email: "",
+        role: "student" as const,
+        streak: 0,
+        points: 0,
+        level: 1,
+        completedLessonIds: [],
+        solvedProblemIds: [],
+        enrolledCourseIds: [],
+        weakTopics: [],
+        targetCompanies: [],
+      }
+    );
+  }, [user]);
 
   useEffect(() => {
     Promise.all([
@@ -52,25 +74,34 @@ export const AnalyticsView: React.FC = () => {
       .finally(() => setLoading(false));
   }, []);
 
-  // Compute unified user metrics from the single source of truth
+  // Compute unified user metrics from the single source of truth (Strict User Isolation)
   const metrics = useMemo(() => {
-    if (!user) return null;
+    // 0. User Isolation: ensure submissions, quizzes, and interviews belong to the effective user
+    const userSubmissions = submissions.filter(
+      (s) => !s.userId || s.userId === effectiveUser.id
+    );
+    const userQuizzes = quizAttempts.filter(
+      (q) => !q.userId || q.userId === effectiveUser.id
+    );
+    const userInterviews = mockInterviews.filter(
+      (i) => !i.userId || i.userId === effectiveUser.id
+    );
 
     // 1. Solved Problems (Unified set between user profile & accepted submissions)
-    const acceptedSubmissionProblemIds = submissions
+    const acceptedSubmissionProblemIds = userSubmissions
       .filter((s) => s.status === "Accepted")
       .map((s) => s.problemId);
     const solvedSet = new Set([
-      ...(user.solvedProblemIds || []),
+      ...(effectiveUser.solvedProblemIds || []),
       ...acceptedSubmissionProblemIds,
     ]);
     const solvedCount = solvedSet.size;
 
     // 2. Submissions Breakdown
-    const totalSubmissionsCount = submissions.length;
-    const acceptedSubmissionsCount = submissions.filter((s) => s.status === "Accepted").length;
-    const failedSubmissionsCount = submissions.filter((s) => s.status !== "Accepted").length;
-    const attemptedProblemIds = Array.from(new Set(submissions.map((s) => s.problemId)));
+    const totalSubmissionsCount = userSubmissions.length;
+    const acceptedSubmissionsCount = userSubmissions.filter((s) => s.status === "Accepted").length;
+    const failedSubmissionsCount = userSubmissions.filter((s) => s.status !== "Accepted").length;
+    const attemptedProblemIds = Array.from(new Set(userSubmissions.map((s) => s.problemId)));
     const inProgressProblemIds = attemptedProblemIds.filter((id) => !solvedSet.has(id));
     const acceptanceRate =
       totalSubmissionsCount > 0
@@ -78,7 +109,7 @@ export const AnalyticsView: React.FC = () => {
         : 0;
 
     // 3. Lessons & Courses
-    const completedLessonIds = user.completedLessonIds || [];
+    const completedLessonIds = effectiveUser.completedLessonIds || [];
     const totalLessons = courses.reduce(
       (acc, c) =>
         acc +
@@ -88,31 +119,31 @@ export const AnalyticsView: React.FC = () => {
       0
     );
     const estimatedHoursWatched = +(
-      ((user.learningMinutes || 0) + completedLessonIds.length * 25) /
+      ((effectiveUser.learningMinutes || 0) + completedLessonIds.length * 25) /
       60
     ).toFixed(1);
 
     // 4. Quizzes & Mock Interviews
-    const quizzesCount = quizAttempts.length || user.quizzesCompleted || 0;
-    const passedQuizzesCount = quizAttempts.filter(
+    const quizzesCount = userQuizzes.length || effectiveUser.quizzesCompleted || 0;
+    const passedQuizzesCount = userQuizzes.filter(
       (q) => q.scorePercentage >= 60
     ).length;
     const avgQuizScore =
-      quizAttempts.length > 0
+      userQuizzes.length > 0
         ? Math.round(
-            quizAttempts.reduce((acc, q) => acc + q.scorePercentage, 0) /
-              quizAttempts.length
+            userQuizzes.reduce((acc, q) => acc + q.scorePercentage, 0) /
+              userQuizzes.length
           )
         : 0;
 
-    const totalInterviewsCount = mockInterviews.length;
-    const completedInterviewsCount = mockInterviews.filter(
+    const totalInterviewsCount = userInterviews.length;
+    const completedInterviewsCount = userInterviews.filter(
       (m) => m.status === "completed"
     ).length;
-    const inProgressInterviewsCount = mockInterviews.filter(
+    const inProgressInterviewsCount = userInterviews.filter(
       (m) => m.status === "in_progress"
     ).length;
-    const completedInterviews = mockInterviews.filter((m) => m.status === "completed");
+    const completedInterviews = userInterviews.filter((m) => m.status === "completed");
     const avgInterviewScore =
       completedInterviews.length > 0
         ? Math.round(
@@ -147,11 +178,11 @@ export const AnalyticsView: React.FC = () => {
         const isFuture = idx > currentDayOfWeek;
 
         // Check if user has streak history on this date
-        const historyEntry = (user.streakHistory || []).find(
+        const historyEntry = (effectiveUser.streakHistory || []).find(
           (h) => h.date === dateString
         );
-        const hasQualifyingDate = user.lastQualifyingDate === dateString;
-        const hasSubmissionsOnDate = submissions.some((s) =>
+        const hasQualifyingDate = effectiveUser.lastQualifyingDate === dateString;
+        const hasSubmissionsOnDate = userSubmissions.some((s) =>
           s.submittedAt?.startsWith(dateString)
         );
 
@@ -160,7 +191,7 @@ export const AnalyticsView: React.FC = () => {
           (Boolean(historyEntry) ||
             hasQualifyingDate ||
             hasSubmissionsOnDate ||
-            (user.streak > 0 && idx === currentDayOfWeek));
+            ((effectiveUser.streak || 0) > 0 && idx === currentDayOfWeek));
 
         const minutes = isActive
           ? Math.max(25, (historyEntry?.count || 1) * 30)
@@ -200,7 +231,7 @@ export const AnalyticsView: React.FC = () => {
         topicProbIds.has(id)
       ).length;
 
-      const topicSubs = submissions.filter((s) => topicProbIds.has(s.problemId));
+      const topicSubs = userSubmissions.filter((s) => topicProbIds.has(s.problemId));
       const topicAcceptedSubs = topicSubs.filter((s) => s.status === "Accepted").length;
 
       const userPassRate =
@@ -239,7 +270,7 @@ export const AnalyticsView: React.FC = () => {
         }
       }
     }
-    for (const interview of mockInterviews) {
+    for (const interview of userInterviews) {
       if (interview.company) {
         const compName =
           interview.company.charAt(0).toUpperCase() + interview.company.slice(1);
@@ -257,7 +288,7 @@ export const AnalyticsView: React.FC = () => {
         solved: stats.solved,
         mocks: stats.mocks,
         totalActivity: stats.solved + stats.mocks,
-        isTarget: (user.targetCompanies || []).some(
+        isTarget: (effectiveUser.targetCompanies || []).some(
           (tc) => tc.toLowerCase() === name.toLowerCase()
         ),
       };
@@ -276,10 +307,10 @@ export const AnalyticsView: React.FC = () => {
       completedLessonsCount: completedLessonIds.length,
       totalLessons,
       estimatedHoursWatched,
-      streak: user.streak || 0,
-      longestStreak: user.longestStreak || user.streak || 0,
-      xp: user.xp || 0,
-      level: user.level || 1,
+      streak: effectiveUser.streak || 0,
+      longestStreak: effectiveUser.longestStreak || effectiveUser.streak || 0,
+      xp: effectiveUser.xp || 0,
+      level: effectiveUser.level || 1,
       quizzesCount,
       passedQuizzesCount,
       avgQuizScore,
@@ -299,7 +330,7 @@ export const AnalyticsView: React.FC = () => {
         quizzesCount > 0 ||
         totalInterviewsCount > 0,
     };
-  }, [user, submissions, problems, courses, quizAttempts, mockInterviews]);
+  }, [effectiveUser, submissions, problems, courses, quizAttempts, mockInterviews]);
 
   if (loading) {
     return (
@@ -319,7 +350,7 @@ export const AnalyticsView: React.FC = () => {
     );
   }
 
-  if (!user || !metrics) return null;
+  if (!metrics) return null;
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-8 animate-fadeIn text-zinc-100 font-sans">
@@ -336,6 +367,45 @@ export const AnalyticsView: React.FC = () => {
           Comprehensive telemetry of runtime executions, DSA completion percentiles, topic radar, and streak consistency.
         </p>
       </div>
+
+      {/* Meaningful Zero-State Guidance (Ensures Analytics is never blank) */}
+      {!metrics.hasRealActivity && (
+        <div className="p-6 rounded-3xl bg-[#111118] border border-orange-500/30 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" />
+                <h3 className="font-bold text-sm text-white font-mono uppercase tracking-wider">
+                  Learning Activity: No activity recorded yet.
+                </h3>
+              </div>
+              <p className="text-xs text-zinc-400 max-w-xl">
+                Your performance metrics, topic mastery radar, and streak heatmap will automatically calibrate as you complete lessons, solve algorithmic problems, and take mock interviews.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => setCurrentTab("courses")}
+                className="px-3.5 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-mono font-bold uppercase tracking-wider transition shadow-sm"
+              >
+                Start Learning
+              </button>
+              <button
+                onClick={() => setCurrentTab("coding")}
+                className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-mono font-bold uppercase tracking-wider transition border border-zinc-700"
+              >
+                Solve a Problem
+              </button>
+              <button
+                onClick={() => setCurrentTab("mock-interview")}
+                className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-mono font-bold uppercase tracking-wider transition border border-zinc-700"
+              >
+                Take an Interview
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Primary Metric Tiles */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 font-mono">

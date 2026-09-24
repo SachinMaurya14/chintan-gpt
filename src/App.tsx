@@ -4,7 +4,7 @@ import { AppProvider, useApp } from "./context/AppContext.js";
 import { Navbar } from "./components/Navbar.js";
 import { Sidebar } from "./components/Sidebar.js";
 import { SearchModal } from "./components/SearchModal.js";
-import { ChintanAITutorDrawer } from "./components/ChintanTutor/ChintanAITutorDrawer.js";
+import { AuthModal } from "./components/AuthModal.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import { Loader2 } from "lucide-react";
 
@@ -18,6 +18,7 @@ import { MockInterviewHub } from "./components/Interview/MockInterviewHub.js";
 import { AnalyticsView } from "./components/Analytics/AnalyticsView.js";
 import { AdminPanel } from "./components/Admin/AdminPanel.js";
 import { PlaygroundPage } from "./components/Playground/PlaygroundPage.js";
+import { ChintanTutorView } from "./components/ChintanTutor/ChintanTutorView.js";
 
 const ViewLoadingFallback: React.FC = () => (
   <div className="flex-1 flex flex-col items-center justify-center min-h-[60vh] text-zinc-400 font-mono space-y-3">
@@ -50,6 +51,8 @@ const MainAppContent: React.FC = () => {
     switch (currentTab) {
       case "dashboard":
         return <DashboardHome />;
+      case "tutor":
+        return <ChintanTutorView />;
       case "playground":
         return <PlaygroundPage />;
       case "courses":
@@ -71,7 +74,8 @@ const MainAppContent: React.FC = () => {
 
   const isFullBleedView =
     (currentTab === "coding" && !!selectedProblemId) ||
-    (currentTab === "courses" && !!selectedCourseId);
+    (currentTab === "courses" && !!selectedCourseId) ||
+    currentTab === "tutor";
 
   return (
     <div className="min-h-screen flex flex-col bg-[#09090b] text-zinc-100 font-sans antialiased selection:bg-orange-500 selection:text-white transition-colors duration-200">
@@ -84,7 +88,7 @@ const MainAppContent: React.FC = () => {
         {!isFullBleedView && <Sidebar />}
 
         {/* Dynamic Viewport */}
-        <main className="flex-1 overflow-y-auto min-h-[calc(100vh-4rem)]">
+        <main className={`flex-1 ${currentTab === "tutor" ? "overflow-hidden h-[calc(100vh-4rem)]" : "overflow-y-auto min-h-[calc(100vh-4rem)]"}`}>
           <ErrorBoundary>
             <Suspense fallback={<ViewLoadingFallback />}>
               {renderActiveView()}
@@ -93,11 +97,11 @@ const MainAppContent: React.FC = () => {
         </main>
       </div>
 
-      {/* Chintan AI Global Mentor Drawer */}
-      <ChintanAITutorDrawer />
-
       {/* Global Cmd+K Search Modal */}
       <SearchModal />
+
+      {/* Global Auth Modal */}
+      <AuthModal />
     </div>
   );
 };
