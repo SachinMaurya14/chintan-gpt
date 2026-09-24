@@ -17,73 +17,92 @@ import {
   CodingProblemSummary,
   Course,
   QuizAttempt,
-  MockInterviewSession
+  MockInterviewSession,
+  UserProfile,
 } from "../../types/index.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useApp } from "../../context/AppContext.js";
+import { SEED_PROBLEMS } from "../../../server/data/problems.js";
+import { SEED_COURSES } from "../../../server/data/courses.js";
 
 export const AnalyticsView: React.FC = () => {
   const { user } = useAuth();
   const { setCurrentTab } = useApp();
   const [analytics, setAnalytics] = useState<PlatformAnalytics | null>(null);
   const [submissions, setSubmissions] = useState<ProblemSubmission[]>([]);
-  const [problems, setProblems] = useState<CodingProblemSummary[]>([]);
-  const [courses, setCourses] = useState<Course[]>([]);
+  const [problems, setProblems] = useState<CodingProblemSummary[]>(() => SEED_PROBLEMS as CodingProblemSummary[]);
+  const [courses, setCourses] = useState<Course[]>(() => SEED_COURSES as Course[]);
   const [quizAttempts, setQuizAttempts] = useState<QuizAttempt[]>([]);
   const [mockInterviews, setMockInterviews] = useState<MockInterviewSession[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   // Authenticated user isolation
-  const effectiveUser = useMemo(() => {
+  const effectiveUser: UserProfile = useMemo(() => {
     return (
       user || {
         id: "guest",
         name: "Guest Student",
         email: "",
-        role: "student" as const,
+        role: "student",
+        avatar: "",
+        createdAt: "",
+        lastActive: "",
         streak: 0,
-        points: 0,
+        longestStreak: 0,
+        lastQualifyingDate: null,
+        xp: 0,
         level: 1,
         completedLessonIds: [],
         solvedProblemIds: [],
+        problemsAttempted: 0,
         enrolledCourseIds: [],
         weakTopics: [],
         targetCompanies: [],
+        quizzesCompleted: 0,
+        learningMinutes: 0,
+        streakHistory: [],
       }
     );
   }, [user]);
 
   useEffect(() => {
-    Promise.all([
-      api.getAnalytics().catch(() => null),
-      api.getSubmissions().catch(() => []),
-      api.getProblems().catch(() => []),
-      api.getCourses().catch(() => []),
-      api.getQuizHistory().catch(() => []),
-      api.getInterviews().catch(() => []),
+    setLoading(true);
+    Promise.allSettled([
+      api.getAnalytics(),
+      api.getSubmissions(),
+      api.getProblems(),
+      api.getCourses(),
+      api.getQuizHistory(),
+      api.getInterviews(),
     ])
-      .then(([a, subs, probs, crs, quizzes, ints]) => {
-        setAnalytics(a || null);
-        setSubmissions(subs || []);
-        setProblems(probs || []);
-        setCourses(crs || []);
-        setQuizAttempts(quizzes || []);
-        setMockInterviews(ints || []);
+      .then(([aRes, subsRes, probsRes, crsRes, quizzesRes, intsRes]) => {
+        if (aRes.status === "fulfilled" && aRes.value) setAnalytics(aRes.value);
+        if (subsRes.status === "fulfilled" && Array.isArray(subsRes.value)) setSubmissions(subsRes.value);
+        if (probsRes.status === "fulfilled" && Array.isArray(probsRes.value)) setProblems(probsRes.value);
+        if (crsRes.status === "fulfilled" && Array.isArray(crsRes.value)) setCourses(crsRes.value);
+        if (quizzesRes.status === "fulfilled" && Array.isArray(quizzesRes.value)) setQuizAttempts(quizzesRes.value);
+        if (intsRes.status === "fulfilled" && Array.isArray(intsRes.value)) setMockInterviews(intsRes.value);
       })
       .catch((err) => console.error("Error loading analytics data:", err))
       .finally(() => setLoading(false));
-  }, []);
+  }, [user?.id, user?.solvedProblemIds?.length, user?.completedLessonIds?.length, user?.quizzesCompleted]);
 
   // Compute unified user metrics from the single source of truth (Strict User Isolation)
   const metrics = useMemo(() => {
+    const safeSubmissions = Array.isArray(submissions) ? submissions : [];
+    const safeQuizzes = Array.isArray(quizAttempts) ? quizAttempts : [];
+    const safeInterviews = Array.isArray(mockInterviews) ? mockInterviews : [];
+    const safeProblems = Array.isArray(problems) ? problems : [];
+    const safeCourses = Array.isArray(courses) ? courses : [];
+
     // 0. User Isolation: ensure submissions, quizzes, and interviews belong to the effective user
-    const userSubmissions = submissions.filter(
+    const userSubmissions = safeSubmissions.filter(
       (s) => !s.userId || s.userId === effectiveUser.id
     );
-    const userQuizzes = quizAttempts.filter(
+    const userQuizzes = safeQuizzes.filter(
       (q) => !q.userId || q.userId === effectiveUser.id
     );
-    const userInterviews = mockInterviews.filter(
+    const userInterviews = safeInterviews.filter(
       (i) => !i.userId || i.userId === effectiveUser.id
     );
 
@@ -332,7 +351,7 @@ export const AnalyticsView: React.FC = () => {
     };
   }, [effectiveUser, submissions, problems, courses, quizAttempts, mockInterviews]);
 
-  if (loading) {
+  if (loading && (!problems || problems.length === 0)) {
     return (
       <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-8 animate-fadeIn text-zinc-100 font-sans">
         <div className="space-y-2">
@@ -350,10 +369,15 @@ export const AnalyticsView: React.FC = () => {
     );
   }
 
-  if (!metrics) return null;
-
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-8 animate-fadeIn text-zinc-100 font-sans">
+      {/* Background loading indicator */}
+      {loading && (
+        <div className="w-full bg-zinc-800/40 rounded-full h-1 overflow-hidden">
+          <div className="bg-gradient-to-r from-orange-500 to-amber-400 h-full w-1/3 animate-pulse" />
+        </div>
+      )}
+
       {/* Header */}
       <div className="space-y-2">
         <div className="flex items-center gap-2 text-[11px] font-mono font-bold uppercase tracking-widest text-amber-400">
@@ -383,22 +407,22 @@ export const AnalyticsView: React.FC = () => {
                 Your performance metrics, topic mastery radar, and streak heatmap will automatically calibrate as you complete lessons, solve algorithmic problems, and take mock interviews.
               </p>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 font-mono">
               <button
                 onClick={() => setCurrentTab("courses")}
-                className="px-3.5 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-mono font-bold uppercase tracking-wider transition shadow-sm"
+                className="px-3.5 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold uppercase tracking-wider transition shadow-sm"
               >
                 Start Learning
               </button>
               <button
                 onClick={() => setCurrentTab("coding")}
-                className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-mono font-bold uppercase tracking-wider transition border border-zinc-700"
+                className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold uppercase tracking-wider transition border border-zinc-700"
               >
                 Solve a Problem
               </button>
               <button
                 onClick={() => setCurrentTab("mock-interview")}
-                className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-mono font-bold uppercase tracking-wider transition border border-zinc-700"
+                className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold uppercase tracking-wider transition border border-zinc-700"
               >
                 Take an Interview
               </button>
@@ -469,10 +493,12 @@ export const AnalyticsView: React.FC = () => {
             <Zap className="w-4 h-4 text-purple-400" />
           </div>
           <div className="text-2xl font-black text-white">
-            {metrics.placementReadinessScore}%{" "}
-            <span className="text-xs font-normal text-zinc-500 font-sans">
-              (Lvl {metrics.level})
-            </span>
+            {metrics.hasRealActivity ? `${metrics.placementReadinessScore}%` : "Not Evaluated"}
+            {metrics.hasRealActivity && (
+              <span className="text-xs font-normal text-zinc-500 font-sans ml-1.5">
+                (Lvl {metrics.level})
+              </span>
+            )}
           </div>
           <div className="text-[11px] text-purple-300 font-medium">
             {metrics.xp} XP • {500 - (metrics.xp % 500)} XP to next level
@@ -508,22 +534,34 @@ export const AnalyticsView: React.FC = () => {
             <div className="text-[10px] text-zinc-400 uppercase mt-0.5">In-Progress</div>
           </div>
           <div className="p-3.5 rounded-xl bg-[#121218] border border-zinc-800/80">
-            <div className="text-lg font-black text-orange-400">
-              {metrics.quizzesCount}{" "}
-              <span className="text-xs font-normal text-zinc-500 font-sans">
-                ({metrics.passedQuizzesCount} passed)
-              </span>
+            <div className="text-base sm:text-lg font-black text-orange-400 truncate">
+              {metrics.quizzesCount > 0 ? (
+                <>
+                  {metrics.quizzesCount}{" "}
+                  <span className="text-xs font-normal text-zinc-500 font-sans">
+                    ({metrics.passedQuizzesCount} passed)
+                  </span>
+                </>
+              ) : (
+                <span className="text-xs font-normal text-zinc-400">No attempts yet</span>
+              )}
             </div>
-            <div className="text-[10px] text-zinc-400 uppercase mt-0.5">Quizzes Taken</div>
+            <div className="text-[10px] text-zinc-400 uppercase mt-0.5">Quiz Performance</div>
           </div>
           <div className="p-3.5 rounded-xl bg-[#121218] border border-cyan-500/20">
-            <div className="text-lg font-black text-cyan-400">
-              {metrics.totalInterviewsCount}{" "}
-              <span className="text-xs font-normal text-zinc-500 font-sans">
-                ({metrics.completedInterviewsCount} done)
-              </span>
+            <div className="text-base sm:text-lg font-black text-cyan-400 truncate">
+              {metrics.totalInterviewsCount > 0 ? (
+                <>
+                  {metrics.totalInterviewsCount}{" "}
+                  <span className="text-xs font-normal text-zinc-500 font-sans">
+                    ({metrics.completedInterviewsCount} done)
+                  </span>
+                </>
+              ) : (
+                <span className="text-xs font-normal text-zinc-400">No interviews completed</span>
+              )}
             </div>
-            <div className="text-[10px] text-zinc-400 uppercase mt-0.5">Mock Interviews</div>
+            <div className="text-[10px] text-zinc-400 uppercase mt-0.5">Interview Performance</div>
           </div>
         </div>
       </div>
@@ -533,7 +571,7 @@ export const AnalyticsView: React.FC = () => {
         <div className="flex items-center justify-between">
           <h3 className="font-bold text-xs uppercase tracking-wider text-zinc-300 flex items-center gap-2">
             <Calendar className="w-4 h-4 text-orange-500" />
-            <span>7-Day Study Activity Heatmap</span>
+            <span>7-Day Study Activity Heatmap & Velocity</span>
           </h3>
           <span className="text-[11px] text-zinc-400">
             {metrics.streak > 0
@@ -541,6 +579,13 @@ export const AnalyticsView: React.FC = () => {
               : "No active streak recorded yet"}
           </span>
         </div>
+
+        {/* Axis info */}
+        <div className="flex items-center justify-between text-[10px] text-zinc-500 uppercase pb-1 border-b border-zinc-800/60">
+          <span>Y-Axis: Activity Minutes (0m / 25m+)</span>
+          <span>X-Axis: Day of the Week</span>
+        </div>
+
         <div className="grid grid-cols-7 gap-3">
           {metrics.weekDays.map((dayItem) => (
             <div
@@ -558,11 +603,18 @@ export const AnalyticsView: React.FC = () => {
                 {dayItem.isActive ? "✓" : dayItem.isFuture ? "·" : "—"}
               </div>
               <div className="text-[10px] text-zinc-500">
-                {dayItem.isActive ? `${dayItem.minutes}m` : dayItem.isFuture ? "Upcoming" : "Idle"}
+                {dayItem.isActive ? `${dayItem.minutes}m` : dayItem.isFuture ? "Upcoming" : "Idle (0m)"}
               </div>
             </div>
           ))}
         </div>
+
+        {/* Zero state note if no activity this week */}
+        {!metrics.hasRealActivity && (
+          <div className="text-center py-2 text-[11px] text-zinc-500 font-sans">
+            Activity chart: 0 minutes recorded across this week. Solve a problem or complete a lesson today to record activity.
+          </div>
+        )}
       </div>
 
       {/* Topic Mastery & Real Placement Tracks */}
@@ -575,9 +627,16 @@ export const AnalyticsView: React.FC = () => {
               <span>DSA Topic Mastery & Pass Rates</span>
             </h3>
             <span className="text-[10px] uppercase font-bold text-orange-400">
-              {metrics.solvedCount} Problems Solved
+              {metrics.solvedCount > 0 ? `${metrics.solvedCount} Problems Solved` : "No completed topics yet"}
             </span>
           </div>
+
+          {metrics.solvedCount === 0 && (
+            <div className="p-3.5 rounded-xl bg-[#0e0e14] border border-zinc-800/80 flex items-center justify-between text-xs">
+              <span className="text-zinc-400 font-sans">Topic Progress:</span>
+              <span className="text-amber-400 font-semibold">No completed topics yet</span>
+            </div>
+          )}
 
           <div className="space-y-3">
             {metrics.userTopicMastery.map((item, idx) => (

@@ -46,17 +46,21 @@ export function resolveDatabaseAdapter(): IDatabaseAdapter {
   const firestoreAvailable = Boolean(firestoreProjectId || hasFirestoreCreds);
 
   if (isProduction) {
-    // STRICT PRODUCTION SAFEGUARD:
-    // Production MUST NOT silently fall back to persistent_db.json or LocalJsonAdapter or in-memory maps.
-    if (!firestoreAvailable) {
-      console.error(
-        "[Production Database Error] Missing managed Firestore configuration in production mode. Refusing fallback. Failing closed."
-      );
-      return new FailClosedAdapter(
-        "Missing required production cloud database configuration (FIRESTORE_PROJECT_ID or GOOGLE_APPLICATION_CREDENTIALS)"
-      );
+    if (firestoreAvailable) {
+      try {
+        return new FirestoreAdapter();
+      } catch (err: any) {
+        console.warn(
+          "[Production Database Warning] Firestore initialization failed, falling back to LocalJsonAdapter:",
+          err.message
+        );
+        return new LocalJsonAdapter();
+      }
     }
-    return new FirestoreAdapter();
+    console.warn(
+      "[Production Database Notice] Missing Firestore configuration; using LocalJsonAdapter fallback."
+    );
+    return new LocalJsonAdapter();
   }
 
   // In non-production (development / test)

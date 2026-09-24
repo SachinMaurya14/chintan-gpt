@@ -852,23 +852,14 @@ export const api = {
       return await request<PlatformAnalytics>("/analytics/platform");
     } catch {
       return {
-        totalStudents: 14280,
-        activeToday: 1840,
-        totalSubmissions: 89400,
-        totalQuizzesTaken: 12500,
-        totalInterviewsCompleted: 3400,
-        acceptanceRateGlobal: 68.5,
-        topCompaniesPracticed: [
-          { name: "Google", count: 4200 },
-          { name: "TCS", count: 3800 },
-          { name: "Microsoft", count: 3100 },
-          { name: "Amazon", count: 2900 }
-        ],
-        topicDistribution: [
-          { topic: "Arrays & Hashing", totalProblems: 45, avgPassRate: 72 },
-          { topic: "Two Pointers & Sliding Window", totalProblems: 30, avgPassRate: 64 },
-          { topic: "Trees & Graphs", totalProblems: 40, avgPassRate: 58 }
-        ]
+        totalStudents: 0,
+        activeToday: 0,
+        totalSubmissions: 0,
+        totalQuizzesTaken: 0,
+        totalInterviewsCompleted: 0,
+        acceptanceRateGlobal: 0,
+        topCompaniesPracticed: [],
+        topicDistribution: []
       };
     }
   },

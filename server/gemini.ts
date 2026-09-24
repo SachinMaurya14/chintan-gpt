@@ -3,19 +3,26 @@ import { GoogleGenAI } from "@google/genai";
 let aiClient: GoogleGenAI | null = null;
 
 function getAI(): GoogleGenAI {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error("GEMINI_API_KEY is not configured in environment variables.");
-  }
   if (!aiClient) {
-    aiClient = new GoogleGenAI({
-      apiKey,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        }
-      }
-    });
+    const apiKey = process.env.GEMINI_API_KEY;
+    aiClient = new GoogleGenAI(
+      apiKey
+        ? {
+            apiKey,
+            httpOptions: {
+              headers: {
+                'User-Agent': 'aistudio-build',
+              },
+            },
+          }
+        : {
+            httpOptions: {
+              headers: {
+                'User-Agent': 'aistudio-build',
+              },
+            },
+          }
+    );
   }
   return aiClient;
 }

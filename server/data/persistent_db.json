@@ -6,7 +6,7 @@
       "name": "Platform Admin",
       "email": "admin@chintangpt.com",
       "role": "admin",
-      "passwordHash": "$2b$10$7dqKk6thENSSgpw2.l1oHOTy/H0f1W4K9vQgAszA6eXawoijdpnj.",
+      "passwordHash": "$2b$10$UZSE1765TFEubEmAsZCGa.nwIF3hBttZhf.TdMs06dCBYLpO.OJyq",
       "avatar": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&fit=crop",
       "createdAt": "2026-09-19T04:10:14.148Z",
       "lastActive": "2026-09-19T04:13:41.269Z",
@@ -45,10 +45,10 @@
       "name": "Student Scholar",
       "email": "student@chintangpt.com",
       "role": "student",
-      "passwordHash": "$2b$10$Gjvbz8Q5v94xtHfJjlmEM.bRTnQ96l0XeUB.kSTJpDrG.nbuafzHG",
+      "passwordHash": "$2b$10$dj9XX5QJn.TYO9ZSu53I7erVIQOXlYY6S8Hie4Hz5p2wRr5n/nPES",
       "avatar": "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&fit=crop",
       "createdAt": "2026-09-19T04:10:14.149Z",
-      "lastActive": "2026-09-19T04:10:14.149Z",
+      "lastActive": "2026-09-24T13:32:02.341Z",
       "streak": 0,
       "longestStreak": 0,
       "lastQualifyingDate": null,
@@ -62,7 +62,8 @@
       "quizzesCompleted": 0,
       "learningMinutes": 0,
       "weakTopics": [],
-      "streakHistory": []
+      "streakHistory": [],
+      "tokenVersion": 2
     },
     "usr_1789791069131_k8895": {
       "id": "usr_1789791069131_k8895",
@@ -12275,6 +12276,14 @@
       "tag": "Feature",
       "date": "2026-08-17",
       "active": true
+    }
+  ],
+  "revokedTokens": [
+    {
+      "jti": "38dd430e-1a65-43fb-b2da-73c534f15bb6",
+      "expiresAt": 1790861522000,
+      "revokedAt": "2026-09-24T13:32:02.199Z",
+      "userId": "usr_student_1"
     }
   ]
 }

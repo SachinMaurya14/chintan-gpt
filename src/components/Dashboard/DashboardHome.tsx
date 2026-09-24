@@ -26,25 +26,29 @@ import {
 import { useAuth } from "../../context/AuthContext.js";
 import { useApp } from "../../context/AppContext.js";
 import { api } from "../../services/api.js";
+import { SEED_PROBLEMS } from "../../../server/data/problems.js";
+import { SEED_COURSES } from "../../../server/data/courses.js";
+import { SEED_COMPANIES } from "../../../server/data/companies.js";
 import {
   Course,
   CodingProblemSummary,
   CompanyPrep,
   ProblemSubmission,
-  MockInterviewSession
+  MockInterviewSession,
+  UserProfile,
 } from "../../types/index.js";
 
 export const DashboardHome: React.FC = () => {
   const { user, setIsAuthModalOpen, setAuthModalMode } = useAuth();
   const { navigateToCourse, navigateToProblem, navigateToCompany, setCurrentTab } = useApp();
 
-  const [courses, setCourses] = useState<Course[]>([]);
-  const [problems, setProblems] = useState<CodingProblemSummary[]>([]);
-  const [companies, setCompanies] = useState<CompanyPrep[]>([]);
+  const [courses, setCourses] = useState<Course[]>(() => SEED_COURSES as Course[]);
+  const [problems, setProblems] = useState<CodingProblemSummary[]>(() => SEED_PROBLEMS as CodingProblemSummary[]);
+  const [companies, setCompanies] = useState<CompanyPrep[]>(() => SEED_COMPANIES as CompanyPrep[]);
   const [submissions, setSubmissions] = useState<ProblemSubmission[]>([]);
   const [interviews, setInterviews] = useState<MockInterviewSession[]>([]);
   const [recommendations, setRecommendations] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const fetchDashboardData = () => {
@@ -95,24 +99,33 @@ export const DashboardHome: React.FC = () => {
 
   useEffect(() => {
     fetchDashboardData();
-  }, []);
+  }, [user?.id, user?.solvedProblemIds?.length, user?.completedLessonIds?.length]);
 
   // Authenticated User Isolation & Guest Support
-  const effectiveUser = useMemo(() => {
+  const effectiveUser: UserProfile = useMemo(() => {
     return (
       user || {
         id: "guest",
         name: "Student",
         email: "",
-        role: "student" as const,
+        role: "student",
+        avatar: "",
+        createdAt: "",
+        lastActive: "",
         streak: 0,
-        points: 0,
+        longestStreak: 0,
+        lastQualifyingDate: null,
+        xp: 0,
         level: 1,
         completedLessonIds: [],
         solvedProblemIds: [],
+        problemsAttempted: 0,
         enrolledCourseIds: [],
         weakTopics: [],
         targetCompanies: [],
+        quizzesCompleted: 0,
+        learningMinutes: 0,
+        streakHistory: [],
       }
     );
   }, [user]);
@@ -123,6 +136,14 @@ export const DashboardHome: React.FC = () => {
   const enrolledCourseIds = effectiveUser.enrolledCourseIds || [];
   const weakTopics = effectiveUser.weakTopics || [];
   const targetCompanies = effectiveUser.targetCompanies || [];
+
+  const userSubmissions = useMemo(() => {
+    return (submissions || []).filter(s => !s.userId || s.userId === effectiveUser.id);
+  }, [submissions, effectiveUser.id]);
+
+  const userInterviews = useMemo(() => {
+    return (interviews || []).filter(i => !i.userId || i.userId === effectiveUser.id);
+  }, [interviews, effectiveUser.id]);
 
   const {
     totalSolved,
@@ -174,24 +195,16 @@ export const DashboardHome: React.FC = () => {
     : 0;
 
   const placementReadinessText = useMemo(() => {
-    if (totalSolved === 0 && interviews.length === 0 && completedLessonIds.length === 0) {
+    if (totalSolved === 0 && userInterviews.length === 0 && completedLessonIds.length === 0) {
       return "Not Evaluated";
     }
     const score = Math.min(100, Math.round(
       Math.min(50, (totalSolved / 25) * 50) +
       Math.min(25, (completedLessonIds.length / 15) * 25) +
-      Math.min(25, (interviews.length / 2) * 25)
+      Math.min(25, (userInterviews.length / 2) * 25)
     ));
     return `${score}% Readiness`;
-  }, [totalSolved, interviews.length, completedLessonIds.length]);
-
-  const userSubmissions = useMemo(() => {
-    return (submissions || []).filter(s => !s.userId || s.userId === effectiveUser.id);
-  }, [submissions, effectiveUser.id]);
-
-  const userInterviews = useMemo(() => {
-    return (interviews || []).filter(i => !i.userId || i.userId === effectiveUser.id);
-  }, [interviews, effectiveUser.id]);
+  }, [totalSolved, userInterviews.length, completedLessonIds.length]);
 
   const recentActivities = useMemo(() => {
     const list: Array<{ id: string; type: "problem" | "lesson" | "interview"; title: string; subtitle: string; time: string; status?: string }> = [];
@@ -288,7 +301,7 @@ export const DashboardHome: React.FC = () => {
     };
   }, [courses, user?.lastWatchedVideos, enrolledCourseIds, completedLessonIds]);
 
-  if (loading) {
+  if (loading && (!courses || courses.length === 0)) {
     return (
       <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-8 animate-fadeIn text-zinc-100">
         {/* Skeleton Hero */}
@@ -311,6 +324,12 @@ export const DashboardHome: React.FC = () => {
 
   return (
     <div id="student-dashboard-home" className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-10 animate-fadeIn text-zinc-100">
+      {/* Background loading indicator */}
+      {loading && (
+        <div className="w-full bg-zinc-800/40 rounded-full h-1 overflow-hidden">
+          <div className="bg-gradient-to-r from-orange-500 to-amber-400 h-full w-1/3 animate-pulse" />
+        </div>
+      )}
       {/* Guest Mode Notice */}
       {!user && (
         <div className="p-4 rounded-2xl bg-[#121218] border border-orange-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -483,10 +502,10 @@ export const DashboardHome: React.FC = () => {
               <Sparkles className="w-3.5 h-3.5 text-purple-400" />
             </div>
             <div className="text-lg sm:text-xl font-black text-white">
-              {interviews.length}
+              {userInterviews.length}
             </div>
             <div className="text-[10px] text-zinc-400 truncate">
-              {interviews.length === 1 ? "1 Completed" : `${interviews.length} Completed`}
+              {userInterviews.length === 1 ? "1 Completed" : `${userInterviews.length} Completed`}
             </div>
           </div>
 
@@ -660,7 +679,7 @@ export const DashboardHome: React.FC = () => {
                 <Award className="w-4 h-4 text-emerald-400" />
                 <span className="text-xs font-mono text-zinc-300">Quizzes Passed</span>
               </div>
-              <span className="font-bold font-mono text-white text-sm">{user.quizzesCompleted || 0}</span>
+              <span className="font-bold font-mono text-white text-sm">{effectiveUser.quizzesCompleted || 0}</span>
             </div>
 
             <div className="flex items-center justify-between p-3 rounded-xl bg-[#121218] border border-zinc-800/80">
@@ -668,7 +687,7 @@ export const DashboardHome: React.FC = () => {
                 <Clock className="w-4 h-4 text-cyan-400" />
                 <span className="text-xs font-mono text-zinc-300">Learning Time</span>
               </div>
-              <span className="font-bold font-mono text-white text-sm">{user.learningMinutes || 0} mins</span>
+              <span className="font-bold font-mono text-white text-sm">{effectiveUser.learningMinutes || 0} mins</span>
             </div>
           </div>
         </div>
@@ -762,7 +781,97 @@ export const DashboardHome: React.FC = () => {
         </div>
       </div>
 
-      {/* 4. TARGET COMPANY PLACEMENT TRACKS */}
+      {/* 4. RECENT ACTIVITY & TIMELINE */}
+      <section className="p-6 sm:p-7 rounded-2xl bg-[#0d0d12] border border-zinc-800/90 shadow-sm space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Clock className="w-4 h-4 text-orange-400" />
+            <h3 className="font-bold text-xs uppercase tracking-wider font-mono text-zinc-300">
+              Recent Activity
+            </h3>
+          </div>
+          <span className="text-[11px] font-mono text-zinc-500">
+            {recentActivities.length > 0 ? "Verified Activity Timeline" : "Zero Recorded Activity"}
+          </span>
+        </div>
+
+        {recentActivities.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 font-mono">
+            {recentActivities.map((act) => (
+              <div
+                key={act.id}
+                className="p-4 rounded-xl bg-[#121218] border border-zinc-800/80 flex items-center justify-between gap-3 hover:border-zinc-700 transition"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-lg bg-orange-500/10 border border-orange-500/20 flex items-center justify-center shrink-0">
+                    {act.type === "problem" ? (
+                      <Code2 className="w-4 h-4 text-cyan-400" />
+                    ) : act.type === "lesson" ? (
+                      <BookOpen className="w-4 h-4 text-blue-400" />
+                    ) : (
+                      <Sparkles className="w-4 h-4 text-purple-400" />
+                    )}
+                  </div>
+                  <div className="space-y-0.5 min-w-0">
+                    <div className="text-xs font-bold text-white truncate">
+                      {act.title}
+                    </div>
+                    <div className="text-[10px] text-zinc-400 truncate font-sans">
+                      {act.subtitle}
+                    </div>
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <span className="text-[10px] px-2 py-0.5 rounded bg-zinc-800 text-amber-400 font-semibold">
+                    {act.status || "Done"}
+                  </span>
+                  <div className="text-[9px] text-zinc-500 mt-1">
+                    {new Date(act.time).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="p-8 rounded-xl bg-[#121218] border border-dashed border-zinc-800 text-center space-y-3">
+            <Clock className="w-8 h-8 text-zinc-600 mx-auto" />
+            <div className="space-y-1 max-w-md mx-auto">
+              <h4 className="text-sm font-bold text-zinc-200 font-mono">No activity yet.</h4>
+              <p className="text-xs text-zinc-500 font-sans">
+                You have not completed any exercises or lessons yet. Your solved problems, completed lessons, and mock interview assessments will be logged here.
+              </p>
+            </div>
+            <div className="pt-2 flex flex-wrap justify-center items-center gap-2.5 font-mono">
+              <button
+                onClick={() => setCurrentTab("coding")}
+                className="px-3.5 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold uppercase transition shadow-sm"
+              >
+                Start DSA
+              </button>
+              <button
+                onClick={() => setCurrentTab("courses")}
+                className="px-3.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold uppercase transition border border-zinc-700"
+              >
+                Explore Courses
+              </button>
+              <button
+                onClick={() => setCurrentTab("mock-interview")}
+                className="px-3.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold uppercase transition border border-zinc-700"
+              >
+                Practice Interview
+              </button>
+              <button
+                onClick={() => setCurrentTab("tutor")}
+                className="px-3.5 py-1.5 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 text-xs font-bold uppercase transition border border-purple-500/30"
+              >
+                Ask Chintan AI Tutor
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* 5. TARGET COMPANY PLACEMENT TRACKS */}
       <div className="p-6 sm:p-7 rounded-2xl bg-[#121215] border border-zinc-800/80 shadow-sm space-y-5">
         <div className="flex items-center justify-between">
           <div>

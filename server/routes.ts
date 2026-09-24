@@ -559,10 +559,14 @@ apiRouter.post("/code/submit", requireAuth, async (req: AuthenticatedRequest, re
 });
 
 // Submissions (Returns ONLY the authenticated user's own submissions - IDOR Protection)
-apiRouter.get("/submissions", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+apiRouter.get("/submissions", optionalAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (!req.user) {
+    return res.json([]);
+  }
+
   // Explicit IDOR protection: rejecting attempts to query another user's submissions
-  if (req.query.userId && req.query.userId !== req.user!.id) {
-    if (req.user!.role !== "admin") {
+  if (req.query.userId && req.query.userId !== req.user.id) {
+    if (req.user.role !== "admin") {
       return res.status(403).json({
         success: false,
         error: "Forbidden: You cannot access or query submissions belonging to another user.",
@@ -570,9 +574,9 @@ apiRouter.get("/submissions", requireAuth, async (req: AuthenticatedRequest, res
     }
   }
 
-  const userId = (req.user!.role === "admin" && typeof req.query.userId === "string")
+  const userId = (req.user.role === "admin" && typeof req.query.userId === "string")
     ? req.query.userId
-    : req.user!.id;
+    : req.user.id;
   const problemId = req.query.problemId as string | undefined;
   const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
   const offset = Math.max(Number(req.query.offset) || 0, 0);
@@ -681,8 +685,11 @@ apiRouter.post("/quizzes/submit", requireAuth, async (req: AuthenticatedRequest,
   });
 });
 
-apiRouter.get("/quizzes/history", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  const userId = req.user!.id;
+apiRouter.get("/quizzes/history", optionalAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (!req.user) {
+    return res.json([]);
+  }
+  const userId = req.user.id;
   const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
   const offset = Math.max(Number(req.query.offset) || 0, 0);
   res.json(await db.getQuizAttemptsByUserId(userId, { limit, offset }));
@@ -967,8 +974,11 @@ apiRouter.post("/interview/:id/respond", requireAuth, async (req: AuthenticatedR
   }
 });
 
-apiRouter.get("/interviews", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  const userId = req.user!.id;
+apiRouter.get("/interviews", optionalAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (!req.user) {
+    return res.json([]);
+  }
+  const userId = req.user.id;
   const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
   const offset = Math.max(Number(req.query.offset) || 0, 0);
   res.json(await db.getMockInterviewsByUserId(userId, { limit, offset }));
@@ -978,34 +988,46 @@ apiRouter.get("/interviews", requireAuth, async (req: AuthenticatedRequest, res:
 // 9. ADAPTIVE RECOMMENDATIONS & ANALYTICS
 // ==========================================
 
-apiRouter.get("/recommendations", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  const user = req.user!;
+apiRouter.get("/recommendations", optionalAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const defaultRecs = [
+    {
+      type: "problem",
+      title: "Solve Two Sum",
+      reason: "Essential array hash-map problem frequently asked in placement drives.",
+      priority: "High",
+      id: "prob_two_sum",
+    },
+    {
+      type: "course",
+      title: "Module 1: Web Foundation & JavaScript Event Loop",
+      reason: "Core foundation for frontend engineering and full-stack interviews.",
+      priority: "High",
+      id: "course_fullstack_webdev",
+    },
+  ];
+
+  if (!req.user) {
+    return res.json(defaultRecs);
+  }
+
+  const user = req.user;
   try {
-    const recs = await getAdaptiveLearningRecommendations({
+    const recsPromise = getAdaptiveLearningRecommendations({
       weakTopics: user.weakTopics || [],
       completedCount: (user.completedLessonIds || []).length,
       solvedProblemsCount: (user.solvedProblemIds || []).length,
       targetCompany: user.targetCompanies?.[0] || "TCS",
     });
-    res.json(recs);
+    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500));
+    const recs = await Promise.race([recsPromise, timeoutPromise]);
+    res.json(recs && Array.isArray(recs) && recs.length > 0 ? recs : defaultRecs);
   } catch (err) {
-    res.json([
-      {
-        type: "problem",
-        title: "Solve Two Sum",
-        reason: "Essential array hash-map problem frequently asked in placement drives.",
-        priority: "High",
-        id: "prob_two_sum",
-      },
-      {
-        type: "course",
-        title: "Module 1: Web Foundation & JavaScript Event Loop",
-        reason: "Core foundation for frontend engineering and full-stack interviews.",
-        priority: "High",
-        id: "course_fullstack_webdev",
-      },
-    ]);
+    res.json(defaultRecs);
   }
+});
+
+apiRouter.get("/analytics", async (req: Request, res: Response) => {
+  res.json(await db.getPlatformAnalytics());
 });
 
 apiRouter.get("/analytics/platform", async (req: Request, res: Response) => {
